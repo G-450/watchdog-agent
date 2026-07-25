@@ -48,7 +48,7 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	port := ":8080"
+	port := ":8081"
 	fmt.Printf("Agent listening on port %s (Try accessing /health)\n", port)
 	
 	if err := http.ListenAndServe(port, nil); err != nil {
