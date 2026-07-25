@@ -9,7 +9,8 @@ import (
 func main() {
 	fmt.Println("Starting Watchdog Federated Agent...")
 
-	// Setup basic HTTP server for health checks
+	// Setup basic HTTP server for health checks.
+	// This ensures Kubernetes knows our pod is alive.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
