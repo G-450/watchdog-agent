@@ -31,7 +31,7 @@ func NewClient() (*Client, error) {
 		if envVar := os.Getenv("KUBECONFIG"); envVar != "" {
 			kubeconfig = envVar
 		}
-		
+
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, err
