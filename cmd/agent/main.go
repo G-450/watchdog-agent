@@ -54,7 +54,7 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	port := ":8080"
+	port := ":8081"
 	fmt.Printf("Listening on port %s\n", port)
 
 	// Start the server
