@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"watchdog-agent/internal/k8s"
+	"watchdog-agent/internal/telemetry"
 )
 
 func main() {
@@ -38,6 +39,25 @@ func main() {
 				}
 				fmt.Printf(" - Namespace: %s | Deployment: %s | Replicas: %d\n", d.Namespace, d.Name, replicas)
 			}
+		}
+	}
+	fmt.Println("----------------------------------------\n")
+
+	// --- PHASE 2 TEST: Prometheus Client ---
+	fmt.Println("\n--- Initializing Prometheus Client ---")
+	// For local testing, we assume Prometheus is port-forwarded to localhost:9090
+	promClient, err := telemetry.NewClient("http://localhost:9090")
+	if err != nil {
+		fmt.Printf("Failed to initialize Prometheus client: %v\n", err)
+	} else {
+		fmt.Println("Successfully initialized Prometheus client!")
+		// Let's check CPU for the argocd-server deployment as a test
+		cpu, err := promClient.GetCPUUsage(context.Background(), "argocd", "argocd-server")
+		if err != nil {
+			fmt.Printf("Failed to get CPU usage: %v\n", err)
+			fmt.Println("Make sure you are port-forwarding Prometheus:\n  kubectl port-forward svc/prometheus-stack-kube-prom-prometheus -n monitoring 9090:9090")
+		} else {
+			fmt.Printf("CPU Usage for argocd-server: %s cores\n", cpu)
 		}
 	}
 	fmt.Println("----------------------------------------\n")
