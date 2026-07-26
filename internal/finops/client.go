@@ -48,7 +48,7 @@ func (c *Client) GetDeploymentCost(ctx context.Context, namespace, deployment, w
 
 	q := reqURL.Query()
 	q.Set("window", window)
-	q.Set("aggregate", "namespace,deployment")
+	q.Set("aggregate", "namespace,pod")
 	reqURL.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL.String(), nil)
@@ -76,14 +76,27 @@ func (c *Client) GetDeploymentCost(ctx context.Context, namespace, deployment, w
 	}
 
 	// OpenCost returns a list of windows in "Data". Since we queried one window, we look at Data[0].
-	// The map keys are the aggregated fields. Since we aggregated by "namespace,deployment",
-	// the key format will be "namespace/deployment".
-	key := fmt.Sprintf("%s/%s", namespace, deployment)
-
 	allocations := costResp.Data[0]
-	if alloc, exists := allocations[key]; exists {
-		// Sometimes OpenCost returns __unallocated__ or 0 values, we return what we find.
-		return &alloc, nil
+	
+	// We aggregated by "namespace,pod", so keys look like: "argocd/argocd-server-674cfbc74f-wt7wk"
+	// We want to sum up the cost of all pods belonging to this deployment.
+	prefix := fmt.Sprintf("%s/%s-", namespace, deployment)
+	
+	var totalAlloc Allocation
+	totalAlloc.Name = deployment
+	
+	found := false
+	for key, alloc := range allocations {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			found = true
+			totalAlloc.TotalCost += alloc.TotalCost
+			totalAlloc.CPUCost += alloc.CPUCost
+			totalAlloc.RAMCost += alloc.RAMCost
+		}
+	}
+
+	if found {
+		return &totalAlloc, nil
 	}
 
 	return nil, fmt.Errorf("deployment %s not found in namespace %s in the given window", deployment, namespace)
