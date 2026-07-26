@@ -1,13 +1,36 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"watchdog-agent/internal/k8s"
+	"watchdog-agent/internal/telemetry"
 )
 
 func main() {
 	fmt.Println("Starting Watchdog Federated Agent...")
+	fmt.Println("----------------------------------------\n")
+
+	// --- PHASE 2 TEST: Prometheus Client ---
+	fmt.Println("\n--- Initializing Prometheus Client ---")
+	// For local testing, we assume Prometheus is port-forwarded to localhost:9090
+	promClient, err := telemetry.NewClient("http://localhost:9090")
+	if err != nil {
+		fmt.Printf("Failed to initialize Prometheus client: %v\n", err)
+	} else {
+		fmt.Println("Successfully initialized Prometheus client!")
+		// Let's check CPU for the argocd-server deployment as a test
+		cpu, err := promClient.GetCPUUsage(context.Background(), "argocd", "argocd-server")
+		if err != nil {
+			fmt.Printf("Failed to get CPU usage: %v\n", err)
+			fmt.Println("Make sure you are port-forwarding Prometheus:\n  kubectl port-forward svc/prometheus-stack-kube-prom-prometheus -n monitoring 9090:9090")
+		} else {
+			fmt.Printf("CPU Usage for argocd-server: %s cores\n", cpu)
+		}
+	}
+	fmt.Println("----------------------------------------\n")
 
 	// Setup basic HTTP server for health checks.
 	// This ensures Kubernetes knows our pod is alive.
@@ -18,7 +41,7 @@ func main() {
 
 	port := ":8080"
 	fmt.Printf("Listening on port %s\n", port)
-	
+
 	// Start the server
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
