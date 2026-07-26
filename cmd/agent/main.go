@@ -11,6 +11,21 @@ import (
 
 func main() {
 	fmt.Println("Starting Watchdog Federated Agent...")
+
+	// --- PHASE 1 TEST: Kubernetes Client ---
+	fmt.Println("\n--- Initializing Kubernetes Client ---")
+	k8sClient, err := k8s.NewClient()
+	if err != nil {
+		fmt.Printf("Failed to initialize K8s client: %v\n", err)
+	} else {
+		fmt.Println("Successfully connected to Kubernetes!")
+		deps, err := k8sClient.GetDeployments(context.Background(), "")
+		if err != nil {
+			fmt.Printf("Failed to get deployments: %v\n", err)
+		} else {
+			fmt.Printf("Found %d Deployments in the cluster.\n", len(deps.Items))
+		}
+	}
 	fmt.Println("----------------------------------------\n")
 
 	// --- PHASE 2 TEST: Prometheus Client ---
