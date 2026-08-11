@@ -25,20 +25,15 @@ class Recommendation(BaseModel):
 
 @app.post("/api/v1/analyze", response_model=List[Recommendation])
 async def analyze_snapshot(snapshot: ClusterSnapshot):
-    # Dummy mock implementation
-    return [
-        Recommendation(
-            target="default/mock-app",
-            current_state='{"replicas": 3, "cpu_requests": 1.0}',
-            proposed_state='{"replicas": 2, "cpu_requests": 0.8}',
-            expected_savings=15.0,
-            confidence_score=0.9,
-            supporting_evidence="Mock recommendation for testing",
-            rule_trace=["MockRule"],
-            status="Pending",
-            timestamp=datetime.now(timezone.utc),
-        )
-    ]
+    from reasoner import analyze_workloads
+    snapshot_dict = snapshot.model_dump()
+    recs = analyze_workloads(snapshot_dict)
+    
+    recommendations = []
+    for r in recs:
+        recommendations.append(Recommendation(**r))
+        
+    return recommendations
 
 @app.get("/health")
 async def health_check():
