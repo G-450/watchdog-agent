@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/telemetry"
 )
@@ -20,7 +21,7 @@ func main() {
 		fmt.Println("Make sure you have a valid ~/.kube/config or KUBECONFIG set!")
 	} else {
 		fmt.Println("Successfully connected to Kubernetes!")
-		
+
 		// Attempt to fetch deployments in all namespaces
 		deps, err := k8sClient.GetDeployments(context.Background(), "")
 		if err != nil {
@@ -62,6 +63,22 @@ func main() {
 	}
 	fmt.Println("----------------------------------------\n")
 
+	// --- PHASE 3 TEST: OpenCost Client ---
+	fmt.Println("\n--- Initializing OpenCost Client ---")
+	// For local testing, we assume OpenCost is port-forwarded to localhost:9003
+	costClient := finops.NewClient("http://localhost:9003")
+
+	fmt.Println("Successfully initialized OpenCost client!")
+	// Let's check the cost for the argocd-server deployment over the last 1 day
+	alloc, err := costClient.GetDeploymentCost(context.Background(), "argocd", "argocd-server", "1d")
+	if err != nil {
+		fmt.Printf("Failed to get deployment cost: %v\n", err)
+		fmt.Println("Make sure you are port-forwarding OpenCost:\n  kubectl port-forward svc/opencost -n opencost 9003:9003")
+	} else {
+		fmt.Printf("Cost for argocd-server over the last 1d:\n - Total: $%.4f\n - CPU: $%.4f\n - RAM: $%.4f\n", alloc.TotalCost, alloc.CPUCost, alloc.RAMCost)
+	}
+	fmt.Println("----------------------------------------\n")
+
 	// Setup basic HTTP server for health checks.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -70,7 +87,7 @@ func main() {
 
 	port := ":8081"
 	fmt.Printf("Agent listening on port %s (Try accessing /health)\n", port)
-	
+
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
