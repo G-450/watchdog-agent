@@ -15,6 +15,8 @@ import (
 	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/model"
+	"watchdog-agent/internal/policy"
+	"watchdog-agent/internal/reasoning"
 	"watchdog-agent/internal/storage"
 	"watchdog-agent/internal/telemetry"
 )
@@ -58,6 +60,9 @@ func main() {
 	}
 	defer store.Close()
 
+	aiClient := reasoning.NewClient(cfg)
+	policyValidator := policy.NewLocalValidator()
+
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -98,7 +103,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Run first cycle immediately
-	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store)
+	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator)
 
 	// Loop
 	for {
@@ -108,12 +113,12 @@ func main() {
 			server.Shutdown(context.Background())
 			return
 		case <-ticker.C:
-			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store)
+			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator)
 		}
 	}
 }
 
-func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store) {
+func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store, aiClient *reasoning.Client, validator policy.Validator) {
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now()
 
@@ -251,6 +256,26 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 		slog.Error("Failed to persist cluster snapshot", slog.Any("error", err))
 	} else {
 		slog.Info("Cluster snapshot persisted successfully")
+	}
+
+	// Send to AI Service
+	recs, err := aiClient.Analyze(ctx, clusterSnap)
+	if err != nil {
+		slog.Warn("Failed to get recommendations from AI service", slog.Any("error", err))
+	} else {
+		for _, rec := range recs {
+			err := validator.Validate(rec)
+			if err != nil {
+				slog.Info("Recommendation rejected by policy",
+					slog.String("target", rec.Target),
+					slog.String("reason", rec.RejectionReason))
+			} else {
+				slog.Info("Recommendation approved",
+					slog.String("target", rec.Target),
+					slog.Float64("savings", rec.ExpectedSavings),
+					slog.Float64("confidence", rec.ConfidenceScore))
+			}
+		}
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---",

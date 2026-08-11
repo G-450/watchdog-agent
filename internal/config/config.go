@@ -46,6 +46,11 @@ type StorageConfig struct {
 	Path string `yaml:"path"`
 }
 
+// AIServiceConfig holds the configuration for the Python AI Service.
+type AIServiceConfig struct {
+	URL string `yaml:"url"`
+}
+
 type Config struct {
 	Agent      AgentConfig      `yaml:"agent"`
 	Prometheus PrometheusConfig `yaml:"prometheus"`
@@ -53,6 +58,7 @@ type Config struct {
 	Kubernetes KubernetesConfig `yaml:"kubernetes"`
 	Logging    LoggingConfig    `yaml:"logging"`
 	Storage    StorageConfig    `yaml:"storage"`
+	AIService  AIServiceConfig  `yaml:"ai_service"`
 }
 
 // Load reads the configuration from the given path.
@@ -133,6 +139,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if val := os.Getenv("WATCHDOG_STORAGE_PATH"); val != "" {
 		config.Storage.Path = val
+	}
+	if val := os.Getenv("WATCHDOG_AI_SERVICE_URL"); val != "" {
+		config.AIService.URL = val
 	}
 }
 
