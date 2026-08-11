@@ -109,11 +109,11 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 	}
 
 	// Phase 2: Telemetry Discovery (Temporary test code)
-	cpu, err := promClient.GetCPUUsage(ctx, "argocd", "argocd-server")
+	cpu, err := promClient.GetCPUUsage(ctx, "argocd", "argocd-server", "5m")
 	if err != nil {
 		slog.Error("Failed to get CPU usage", slog.Any("error", err))
 	} else {
-		slog.Info("CPU Usage for argocd-server", slog.String("cpu_cores", cpu))
+		slog.Info("CPU Usage for argocd-server", slog.Float64("cpu_cores", cpu))
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---", slog.Duration("duration", time.Since(startTime)))
