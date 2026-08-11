@@ -15,6 +15,7 @@ import (
 	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/model"
+	"watchdog-agent/internal/storage"
 	"watchdog-agent/internal/telemetry"
 )
 
@@ -44,6 +45,18 @@ func main() {
 	}
 
 	finopsClient := finops.NewClient(cfg)
+
+	// Initialize Storage
+	dbPath := cfg.Storage.Path
+	if dbPath == "" {
+		dbPath = "./data.db" // Fallback default
+	}
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		slog.Error("Failed to initialize storage", slog.Any("error", err))
+		log.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
 
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,7 +98,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Run first cycle immediately
-	runCycle(ctx, cfg, k8sClient, promClient, finopsClient)
+	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store)
 
 	// Loop
 	for {
@@ -95,12 +108,12 @@ func main() {
 			server.Shutdown(context.Background())
 			return
 		case <-ticker.C:
-			runCycle(ctx, cfg, k8sClient, promClient, finopsClient)
+			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store)
 		}
 	}
 }
 
-func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client) {
+func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store) {
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now()
 
@@ -231,6 +244,13 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 	clusterCost, err := finopsClient.GetClusterCost(ctx, "5m")
 	if err == nil && clusterCost != nil {
 		clusterSnap.TotalCost = clusterCost.TotalCost
+	}
+
+	// Persist snapshot to local storage
+	if err := store.SaveSnapshot(ctx, clusterSnap); err != nil {
+		slog.Error("Failed to persist cluster snapshot", slog.Any("error", err))
+	} else {
+		slog.Debug("Cluster snapshot persisted successfully")
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---",
