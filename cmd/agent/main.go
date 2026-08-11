@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/telemetry"
 )
@@ -12,17 +13,24 @@ import (
 func main() {
 	fmt.Println("Starting Watchdog Federated Agent...")
 
+	// Load configuration
+	cfg, err := config.Load("configs/config.yaml")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	fmt.Printf("Loaded config for agent: %s\n", cfg.Agent.Name)
+
 	// --- PHASE 1 TEST: Kubernetes Client ---
 	fmt.Println("\n--- Initializing Kubernetes Client ---")
-	k8sClient, err := k8s.NewClient()
+	k8sClient, err := k8s.NewClient(cfg)
 	if err != nil {
 		fmt.Printf("Failed to initialize K8s client: %v\n", err)
 		fmt.Println("Make sure you have a valid ~/.kube/config or KUBECONFIG set!")
 	} else {
 		fmt.Println("Successfully connected to Kubernetes!")
-		
+
 		// Attempt to fetch deployments in all namespaces
-		deps, err := k8sClient.GetDeployments(context.Background(), "")
+		deps, err := k8sClient.GetDeployments(context.Background(), cfg.Kubernetes.Namespace)
 		if err != nil {
 			fmt.Printf("Failed to get deployments: %v\n", err)
 		} else {
@@ -46,7 +54,7 @@ func main() {
 	// --- PHASE 2 TEST: Prometheus Client ---
 	fmt.Println("\n--- Initializing Prometheus Client ---")
 	// For local testing, we assume Prometheus is port-forwarded to localhost:9090
-	promClient, err := telemetry.NewClient("http://localhost:9090")
+	promClient, err := telemetry.NewClient(cfg)
 	if err != nil {
 		fmt.Printf("Failed to initialize Prometheus client: %v\n", err)
 	} else {
@@ -70,7 +78,7 @@ func main() {
 
 	port := ":8081"
 	fmt.Printf("Agent listening on port %s (Try accessing /health)\n", port)
-	
+
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}

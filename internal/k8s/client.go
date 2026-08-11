@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"watchdog-agent/internal/config"
+
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -21,7 +23,7 @@ type Client struct {
 // NewClient initializes a new Kubernetes client.
 // It attempts to use in-cluster config first (when running as a pod),
 // and falls back to out-of-cluster config (kubeconfig) for local testing.
-func NewClient() (*Client, error) {
+func NewClient(cfg *config.Config) (*Client, error) {
 	// Try in-cluster config first
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -31,7 +33,7 @@ func NewClient() (*Client, error) {
 		if envVar := os.Getenv("KUBECONFIG"); envVar != "" {
 			kubeconfig = envVar
 		}
-		
+
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, err

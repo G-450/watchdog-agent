@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"watchdog-agent/internal/config"
+
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
@@ -16,9 +18,9 @@ type Client struct {
 }
 
 // NewClient initializes a new Telemetry client connecting to the given Prometheus URL.
-func NewClient(prometheusURL string) (*Client, error) {
+func NewClient(cfg *config.Config) (*Client, error) {
 	client, err := api.NewClient(api.Config{
-		Address: prometheusURL,
+		Address: cfg.Prometheus.URL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating prometheus client: %v", err)
