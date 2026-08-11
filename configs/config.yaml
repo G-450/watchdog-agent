@@ -2,18 +2,18 @@
 # Copy to configs/config.local.yaml for local overrides (gitignored)
 
 agent:
-  name: "watchdog-agent"
+  name: "watchdog-agent-01"
   port: 8081
   log_level: "info"              # debug, info, warn, error
   reconcile_interval: "60s"      # how often to run the collection loop
 
 prometheus:
-  url: "http://localhost:9090"   # Port-forward from VM: kubectl port-forward svc/prometheus-stack-kube-prom-prometheus -n monitoring 9090:9090
-  timeout: "10s"
+  url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+  timeout: "5s"
 
 opencost:
-  url: "http://localhost:9003"   # Port-forward from VM: kubectl port-forward svc/opencost -n opencost 9003:9003
-  timeout: "10s"
+  url: "http://opencost.opencost.svc.cluster.local:9003"
+  timeout: "5s"
 
 kubernetes:
   namespace: ""                  # empty = all namespaces
