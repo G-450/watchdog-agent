@@ -41,13 +41,18 @@ type LoggingConfig struct {
 	Level  string `yaml:"level"`
 }
 
-// Config represents the full configuration tree.
+// StorageConfig holds the configuration for data persistence.
+type StorageConfig struct {
+	Path string `yaml:"path"`
+}
+
 type Config struct {
 	Agent      AgentConfig      `yaml:"agent"`
 	Prometheus PrometheusConfig `yaml:"prometheus"`
 	OpenCost   OpenCostConfig   `yaml:"opencost"`
 	Kubernetes KubernetesConfig `yaml:"kubernetes"`
 	Logging    LoggingConfig    `yaml:"logging"`
+	Storage    StorageConfig    `yaml:"storage"`
 }
 
 // Load reads the configuration from the given path.
@@ -125,6 +130,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if val := os.Getenv("WATCHDOG_LOGGING_LEVEL"); val != "" {
 		config.Logging.Level = val
+	}
+	if val := os.Getenv("WATCHDOG_STORAGE_PATH"); val != "" {
+		config.Storage.Path = val
 	}
 }
 

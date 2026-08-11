@@ -25,3 +25,6 @@ kubernetes:
 logging:
   format: "json"                 # json or text
   level: "info"
+
+storage:
+  path: "./data.db"              # path to the SQLite database file
