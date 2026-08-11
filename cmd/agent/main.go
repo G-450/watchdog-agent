@@ -132,6 +132,11 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 			continue
 		}
 
+		services, err := k8sClient.GetServices(ctx, ns.Name)
+		if err != nil {
+			slog.Warn("Failed to list services", slog.String("namespace", ns.Name), slog.Any("error", err))
+		}
+
 		nsCost, _ := finopsClient.GetNamespaceCost(ctx, ns.Name, "5m")
 		var nsTotalCost float64
 		if nsCost != nil {
@@ -179,23 +184,44 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 				replicas = *dep.Spec.Replicas
 			}
 
+			// Map Services
+			var serviceDeps []string
+			if services != nil {
+				for _, svc := range services.Items {
+					if len(svc.Spec.Selector) == 0 {
+						continue
+					}
+					match := true
+					for k, v := range svc.Spec.Selector {
+						if dep.Spec.Template.Labels[k] != v {
+							match = false
+							break
+						}
+					}
+					if match {
+						serviceDeps = append(serviceDeps, svc.Name)
+					}
+				}
+			}
+
 			wlType := k8sClient.ClassifyWorkload(&dep)
 
 			nsSnap.Workloads[dep.Name] = &model.WorkloadSnapshot{
-				Name:        dep.Name,
-				Namespace:   ns.Name,
-				Type:        string(wlType),
-				Replicas:    replicas,
-				CPURequests: cpuReq,
-				CPULimits:   cpuLim,
-				MemRequests: memReq,
-				MemLimits:   memLim,
-				CPUUsage:    cpu,
-				MemUsage:    mem,
-				NetRxUsage:  netRx,
-				NetTxUsage:  netTx,
-				TotalCost:   totalCost,
-				IsExcluded:  false, // Add specific workload exclusions later if needed
+				Name:                dep.Name,
+				Namespace:           ns.Name,
+				Type:                string(wlType),
+				Replicas:            replicas,
+				CPURequests:         cpuReq,
+				CPULimits:           cpuLim,
+				MemRequests:         memReq,
+				MemLimits:           memLim,
+				CPUUsage:            cpu,
+				MemUsage:            mem,
+				NetRxUsage:          netRx,
+				NetTxUsage:          netTx,
+				TotalCost:           totalCost,
+				IsExcluded:          false, // Add specific workload exclusions later if needed
+				ServiceDependencies: serviceDeps,
 			}
 		}
 
