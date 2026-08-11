@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"watchdog-agent/internal/config"
@@ -40,7 +41,7 @@ func (c *Client) GetCPUUsage(ctx context.Context, namespace, deployment string) 
 		return "", fmt.Errorf("error querying prometheus: %v", err)
 	}
 	if len(warnings) > 0 {
-		fmt.Printf("Warnings: %v\n", warnings)
+		slog.Warn("Prometheus query returned warnings", slog.Any("warnings", warnings))
 	}
 
 	// Format result
