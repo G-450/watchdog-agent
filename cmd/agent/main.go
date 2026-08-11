@@ -14,6 +14,7 @@ import (
 	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
+	"watchdog-agent/internal/model"
 	"watchdog-agent/internal/telemetry"
 )
 
@@ -103,6 +104,16 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now()
 
+	clusterSnap := &model.ClusterSnapshot{
+		Timestamp:  startTime,
+		Namespaces: make(map[string]*model.NamespaceSnapshot),
+	}
+
+	nodes, err := k8sClient.GetNodes(ctx)
+	if err == nil {
+		clusterSnap.Nodes = len(nodes.Items)
+	}
+
 	namespaces, err := k8sClient.GetNamespaces(ctx)
 	if err != nil {
 		slog.Error("Failed to list namespaces", slog.Any("error", err))
@@ -121,16 +132,17 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 			continue
 		}
 
-		nsCost, err := finopsClient.GetNamespaceCost(ctx, ns.Name, "5m")
-		if err != nil {
-			slog.Debug("Failed to get namespace cost", slog.String("namespace", ns.Name), slog.Any("error", err))
+		nsCost, _ := finopsClient.GetNamespaceCost(ctx, ns.Name, "5m")
+		var nsTotalCost float64
+		if nsCost != nil {
+			nsTotalCost = nsCost.TotalCost
 		}
 
-		slog.Info("Namespace Summary",
-			slog.String("namespace", ns.Name),
-			slog.Int("deployments", len(deps.Items)),
-			slog.Any("cost", nsCost),
-		)
+		nsSnap := &model.NamespaceSnapshot{
+			Name:          ns.Name,
+			Workloads:     make(map[string]*model.WorkloadSnapshot),
+			NamespaceCost: nsTotalCost,
+		}
 
 		for _, dep := range deps.Items {
 			cpu, _ := promClient.GetCPUUsage(ctx, ns.Name, dep.Name, "5m")
@@ -139,22 +151,65 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 			netTx, _ := promClient.GetNetworkTransmit(ctx, ns.Name, dep.Name, "5m")
 			depCost, _ := finopsClient.GetDeploymentCost(ctx, ns.Name, dep.Name, "5m")
 
-			slog.Info("Workload metrics collected",
-				slog.String("namespace", ns.Name),
-				slog.String("deployment", dep.Name),
-				slog.Float64("cpu_cores", cpu),
-				slog.Float64("memory_bytes", mem),
-				slog.Float64("net_rx_bytes", netRx),
-				slog.Float64("net_tx_bytes", netTx),
-				slog.Any("cost", depCost),
-			)
+			var totalCost float64
+			if depCost != nil {
+				totalCost = depCost.TotalCost
+			}
+
+			// Extract Requests and Limits
+			var cpuReq, cpuLim float64
+			var memReq, memLim int64
+			for _, container := range dep.Spec.Template.Spec.Containers {
+				if req := container.Resources.Requests.Cpu(); req != nil {
+					cpuReq += float64(req.MilliValue()) / 1000.0
+				}
+				if lim := container.Resources.Limits.Cpu(); lim != nil {
+					cpuLim += float64(lim.MilliValue()) / 1000.0
+				}
+				if req := container.Resources.Requests.Memory(); req != nil {
+					memReq += req.Value()
+				}
+				if lim := container.Resources.Limits.Memory(); lim != nil {
+					memLim += lim.Value()
+				}
+			}
+
+			var replicas int32
+			if dep.Spec.Replicas != nil {
+				replicas = *dep.Spec.Replicas
+			}
+
+			wlType := k8sClient.ClassifyWorkload(&dep)
+
+			nsSnap.Workloads[dep.Name] = &model.WorkloadSnapshot{
+				Name:        dep.Name,
+				Namespace:   ns.Name,
+				Type:        string(wlType),
+				Replicas:    replicas,
+				CPURequests: cpuReq,
+				CPULimits:   cpuLim,
+				MemRequests: memReq,
+				MemLimits:   memLim,
+				CPUUsage:    cpu,
+				MemUsage:    mem,
+				NetRxUsage:  netRx,
+				NetTxUsage:  netTx,
+				TotalCost:   totalCost,
+				IsExcluded:  false, // Add specific workload exclusions later if needed
+			}
 		}
+
+		clusterSnap.Namespaces[ns.Name] = nsSnap
 	}
 
 	clusterCost, err := finopsClient.GetClusterCost(ctx, "5m")
-	if err == nil {
-		slog.Info("Cluster Cost Summary", slog.Any("cluster_cost", clusterCost))
+	if err == nil && clusterCost != nil {
+		clusterSnap.TotalCost = clusterCost.TotalCost
 	}
 
-	slog.Info("--- Completed Reconciliation Cycle ---", slog.Duration("duration", time.Since(startTime)))
+	slog.Info("--- Completed Reconciliation Cycle ---",
+		slog.Duration("duration", time.Since(startTime)),
+		slog.Int("namespaces_profiled", len(clusterSnap.Namespaces)),
+		slog.Float64("total_cluster_cost", clusterSnap.TotalCost),
+	)
 }
