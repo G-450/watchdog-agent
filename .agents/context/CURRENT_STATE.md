@@ -2,8 +2,8 @@
 
 Living document of what's built and what's next.
 
-- **Phase**: Phase 2 (Data Export & Metrics) — completed
-- **Next Phase**: Phase 3 (gRPC Federation)
+- **Phase**: Phase 3 (AI Reasoning & Forecasting) — completed
+- **Next Phase**: Phase 4 (GitOps Deployment)
 
 ## Implemented
 - Config system (`config.yaml`, `config.local.yaml`, `os.Getenv`) and structured logging (`slog`)
@@ -14,8 +14,13 @@ Living document of what's built and what's next.
 - Phase 2: Consolidated internal data structures (`ClusterSnapshot`, `NamespaceSnapshot`, `WorkloadSnapshot`)
 - Phase 2: Service dependency mapping (matching `Service.Spec.Selector` to `Deployment.Spec.Template.Labels`)
 - Phase 2: SQLite data persistence layer via `modernc.org/sqlite`
+- Phase 3: Recommendation schema and local policy validator stub (`internal/policy`)
+- Phase 3: Go HTTP client (`internal/reasoning`) for AI integration
+- Phase 3: Python AI Service scaffolding with FastAPI and Dockerfile
+- Phase 3: LangGraph reasoner and basic heuristic forecaster (`ai-service/`)
 - All clients integrated into `main.go` reconciliation loop
-- Unit tests for all clients, config system, and storage system
+- Unit tests for all clients, config system, storage system, policy validator, and AI integration
+- Python `pytest` suite for the LangGraph reasoner
 
 ## Known Issues
 - `agent.exe` binary committed to repo (should be in `.gitignore`)
