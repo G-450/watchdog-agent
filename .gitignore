@@ -8,3 +8,7 @@ __pycache__/
 # Binaries and Storage
 *.db
 agent.exe
+
+# Local-only
+.agents/
+CONTRIBUTING.md
