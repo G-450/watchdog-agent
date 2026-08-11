@@ -1,18 +1,27 @@
+# Watchdog Agent Configuration
+# Copy to configs/config.local.yaml for local overrides (gitignored)
+
 agent:
   name: "watchdog-agent-01"
   port: 8081
-  log_level: "info"
-  reconcile_interval: "60s"
+  log_level: "info"              # debug, info, warn, error
+  reconcile_interval: "60s"      # how often to run the collection loop
+
 prometheus:
   url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
   timeout: "5s"
+
 opencost:
   url: "http://opencost.opencost.svc.cluster.local:9003"
   timeout: "5s"
+
 kubernetes:
-  namespace: ""
+  namespace: ""                  # empty = all namespaces
   excluded_namespaces:
-    - "kube-system"
+    - kube-system
+    - kube-public
+    - kube-node-lease
+
 logging:
-  format: "json"
+  format: "json"                 # json or text
   level: "info"
