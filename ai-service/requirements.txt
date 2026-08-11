@@ -1,6 +1,6 @@
-fastapi==0.110.0
-uvicorn==0.27.1
-langgraph==0.0.26
-langchain==0.1.11
-pandas==2.2.1
-pydantic==2.6.3
+fastapi
+uvicorn
+langgraph
+langchain
+pandas
+pydantic
