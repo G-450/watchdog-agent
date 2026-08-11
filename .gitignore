@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+agent
+
+# Test
+*.test
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment & local config
+.env
+.env.local
+configs/config.local.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+tmp/
+
+.agents/
+CONTRIBUTING.md
