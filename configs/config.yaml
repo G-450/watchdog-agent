@@ -1,0 +1,18 @@
+agent:
+  name: "watchdog-agent-01"
+  port: 8081
+  log_level: "info"
+  reconcile_interval: "60s"
+prometheus:
+  url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+  timeout: "5s"
+opencost:
+  url: "http://opencost.opencost.svc.cluster.local:9003"
+  timeout: "5s"
+kubernetes:
+  namespace: ""
+  excluded_namespaces:
+    - "kube-system"
+logging:
+  format: "json"
+  level: "info"
