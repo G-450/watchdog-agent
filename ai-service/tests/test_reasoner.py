@@ -1,4 +1,8 @@
 import pytest
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from reasoner import analyze_workloads
 from forecaster import generate_forecast
 
