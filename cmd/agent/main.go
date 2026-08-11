@@ -250,7 +250,7 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 	if err := store.SaveSnapshot(ctx, clusterSnap); err != nil {
 		slog.Error("Failed to persist cluster snapshot", slog.Any("error", err))
 	} else {
-		slog.Debug("Cluster snapshot persisted successfully")
+		slog.Info("Cluster snapshot persisted successfully")
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---",
