@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"watchdog-agent/internal/config"
+	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/telemetry"
 )
@@ -40,6 +41,8 @@ func main() {
 		slog.Error("Failed to initialize Prometheus client", slog.Any("error", err))
 		log.Fatalf("Failed to initialize Prometheus client: %v", err)
 	}
+
+	finopsClient := finops.NewClient(cfg)
 
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,7 +84,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Run first cycle immediately
-	runCycle(ctx, cfg, k8sClient, promClient)
+	runCycle(ctx, cfg, k8sClient, promClient, finopsClient)
 
 	// Loop
 	for {
@@ -91,29 +94,66 @@ func main() {
 			server.Shutdown(context.Background())
 			return
 		case <-ticker.C:
-			runCycle(ctx, cfg, k8sClient, promClient)
+			runCycle(ctx, cfg, k8sClient, promClient, finopsClient)
 		}
 	}
 }
 
-func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client) {
+func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client) {
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now()
 
-	// Phase 1: Kubernetes Discovery (Temporary test code)
-	deps, err := k8sClient.GetDeployments(ctx, cfg.Kubernetes.Namespace)
+	namespaces, err := k8sClient.GetNamespaces(ctx)
 	if err != nil {
-		slog.Error("Failed to get deployments", slog.Any("error", err))
-	} else {
-		slog.Info("Found Deployments in the cluster.", slog.Int("count", len(deps.Items)))
+		slog.Error("Failed to list namespaces", slog.Any("error", err))
+		return
 	}
 
-	// Phase 2: Telemetry Discovery (Temporary test code)
-	cpu, err := promClient.GetCPUUsage(ctx, "argocd", "argocd-server", "5m")
-	if err != nil {
-		slog.Error("Failed to get CPU usage", slog.Any("error", err))
-	} else {
-		slog.Info("CPU Usage for argocd-server", slog.Float64("cpu_cores", cpu))
+	for _, ns := range namespaces.Items {
+		if k8sClient.IsExcluded(ns.Name, ns.Annotations) {
+			slog.Debug("Skipping excluded namespace", slog.String("namespace", ns.Name))
+			continue
+		}
+
+		deps, err := k8sClient.GetDeployments(ctx, ns.Name)
+		if err != nil {
+			slog.Error("Failed to list deployments", slog.String("namespace", ns.Name), slog.Any("error", err))
+			continue
+		}
+
+		nsCost, err := finopsClient.GetNamespaceCost(ctx, ns.Name, "5m")
+		if err != nil {
+			slog.Debug("Failed to get namespace cost", slog.String("namespace", ns.Name), slog.Any("error", err))
+		}
+
+		slog.Info("Namespace Summary",
+			slog.String("namespace", ns.Name),
+			slog.Int("deployments", len(deps.Items)),
+			slog.Any("cost", nsCost),
+		)
+
+		for _, dep := range deps.Items {
+			cpu, _ := promClient.GetCPUUsage(ctx, ns.Name, dep.Name, "5m")
+			mem, _ := promClient.GetMemoryUsage(ctx, ns.Name, dep.Name)
+			netRx, _ := promClient.GetNetworkReceive(ctx, ns.Name, dep.Name, "5m")
+			netTx, _ := promClient.GetNetworkTransmit(ctx, ns.Name, dep.Name, "5m")
+			depCost, _ := finopsClient.GetDeploymentCost(ctx, ns.Name, dep.Name, "5m")
+
+			slog.Info("Workload metrics collected",
+				slog.String("namespace", ns.Name),
+				slog.String("deployment", dep.Name),
+				slog.Float64("cpu_cores", cpu),
+				slog.Float64("memory_bytes", mem),
+				slog.Float64("net_rx_bytes", netRx),
+				slog.Float64("net_tx_bytes", netTx),
+				slog.Any("cost", depCost),
+			)
+		}
+	}
+
+	clusterCost, err := finopsClient.GetClusterCost(ctx, "5m")
+	if err == nil {
+		slog.Info("Cluster Cost Summary", slog.Any("cluster_cost", clusterCost))
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---", slog.Duration("duration", time.Since(startTime)))
