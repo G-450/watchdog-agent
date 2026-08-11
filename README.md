@@ -43,7 +43,7 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 │   ├── k8s/            # Kubernetes client
 │   ├── telemetry/      # Prometheus client
 │   └── finops/         # OpenCost client
-├── .agents/            # AI Agent context and rules
+├── .agents/            # AI Agent context and rules (local only)
 └── README.md
 ```
 
@@ -51,7 +51,7 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 See [configs/config.yaml](configs/config.yaml) for the default configuration values. 
 
 ## Contributing
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our development process, branching strategy, and code conventions.
+Please see `CONTRIBUTING.md` (local only) for details on our development process, branching strategy, and code conventions.
 
 ## Related Repos
 - [watchdog-infra](https://github.com/mithulpranav24/watchdog-infra)
