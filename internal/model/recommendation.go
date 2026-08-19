@@ -4,6 +4,7 @@ import "time"
 
 // Recommendation represents an AI-generated optimization recommendation.
 type Recommendation struct {
+	ID                 int64     `json:"id,omitempty"`
 	Target             string    `json:"target"`
 	CurrentState       string    `json:"current_state"`
 	ProposedState      string    `json:"proposed_state"`

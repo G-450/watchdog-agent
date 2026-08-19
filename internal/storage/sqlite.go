@@ -51,8 +51,20 @@ func NewSQLiteStore(dbPath string) (Store, error) {
 		raw_data TEXT NOT NULL,
 		FOREIGN KEY(cluster_snapshot_id) REFERENCES cluster_snapshots(id)
 	);
+
+	CREATE TABLE IF NOT EXISTS recommendations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		target TEXT NOT NULL,
+		status TEXT NOT NULL,
+		expected_savings REAL NOT NULL,
+		confidence_score REAL NOT NULL,
+		timestamp DATETIME NOT NULL,
+		raw_data TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_recommendations_timestamp ON recommendations(timestamp DESC);
+	CREATE INDEX IF NOT EXISTS idx_recommendations_status ON recommendations(status);
 	`
-	
+
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
@@ -137,6 +149,93 @@ func (s *sqliteStore) GetSnapshots(ctx context.Context, since time.Time) ([]*mod
 	}
 
 	return snapshots, nil
+}
+
+func (s *sqliteStore) GetLatestSnapshot(ctx context.Context) (*model.ClusterSnapshot, error) {
+	var rawData string
+	err := s.db.QueryRowContext(ctx, `SELECT raw_data FROM cluster_snapshots ORDER BY timestamp DESC LIMIT 1`).Scan(&rawData)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query latest snapshot: %w", err)
+	}
+
+	var snapshot model.ClusterSnapshot
+	if err := json.Unmarshal([]byte(rawData), &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal latest snapshot: %w", err)
+	}
+	return &snapshot, nil
+}
+
+func (s *sqliteStore) SaveRecommendations(ctx context.Context, recommendations []*model.Recommendation) error {
+	if len(recommendations) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin recommendation transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, recommendation := range recommendations {
+		rawData, err := json.Marshal(recommendation)
+		if err != nil {
+			return fmt.Errorf("failed to marshal recommendation: %w", err)
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO recommendations
+			(target, status, expected_savings, confidence_score, timestamp, raw_data)
+			VALUES (?, ?, ?, ?, ?, ?)`, recommendation.Target, recommendation.Status,
+			recommendation.ExpectedSavings, recommendation.ConfidenceScore,
+			recommendation.Timestamp, string(rawData))
+		if err != nil {
+			return fmt.Errorf("failed to insert recommendation: %w", err)
+		}
+		recommendation.ID, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to read recommendation id: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *sqliteStore) GetRecommendations(ctx context.Context, status string, limit int) ([]*model.Recommendation, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := `SELECT id, raw_data FROM recommendations`
+	args := []interface{}{}
+	if status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY timestamp DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recommendations: %w", err)
+	}
+	defer rows.Close()
+
+	recommendations := make([]*model.Recommendation, 0)
+	for rows.Next() {
+		var id int64
+		var rawData string
+		if err := rows.Scan(&id, &rawData); err != nil {
+			return nil, fmt.Errorf("failed to scan recommendation: %w", err)
+		}
+		var recommendation model.Recommendation
+		if err := json.Unmarshal([]byte(rawData), &recommendation); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal recommendation: %w", err)
+		}
+		recommendation.ID = id
+		recommendations = append(recommendations, &recommendation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("recommendation rows error: %w", err)
+	}
+	return recommendations, nil
 }
 
 func (s *sqliteStore) Close() error {

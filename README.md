@@ -11,6 +11,7 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 - **Telemetry**: Queries Prometheus for usage metrics.
 - **FinOps**: Integrates with OpenCost for cost allocation.
 - **Agent Loop**: Periodically collects data and reports to the control plane.
+- **Visibility API**: Exposes read-only cluster, workload, cost, recommendation, and freshness data for the dashboard.
 
 ## Quick Start
 
@@ -50,12 +51,26 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 ## Configuration
 See [configs/config.yaml](configs/config.yaml) for the default configuration values. 
 
+## Dashboard API
+
+The agent serves the following read-only endpoints on its configured port:
+
+- `/health`
+- `/api/v1/status`
+- `/api/v1/overview`
+- `/api/v1/snapshots`
+- `/api/v1/workloads`
+- `/api/v1/recommendations`
+
+Browser origins must be explicitly listed under `api.allowed_origins`.
+
 ## Contributing
 Please see `CONTRIBUTING.md` (local only) for details on our development process, branching strategy, and code conventions.
 
 ## Related Repos
 - [watchdog-infra](https://github.com/mithulpranav24/watchdog-infra)
 - [watchdog-docs](https://github.com/mithulpranav24/watchdog-docs) (private)
+- `watchdog-dashboard` (operations dashboard)
 
 ## Team
 - mithulpranav24

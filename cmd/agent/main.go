@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"watchdog-agent/internal/api"
 	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
@@ -82,14 +83,9 @@ func main() {
 		cancel()
 	}()
 
-	// Setup Health Server
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
 	port := fmt.Sprintf(":%d", cfg.Agent.Port)
-	server := &http.Server{Addr: port}
+	apiServer := api.NewServer(store, cfg.Agent.Name, cfg.API.AllowedOrigins)
+	server := &http.Server{Addr: port, Handler: apiServer.Handler(), ReadHeaderTimeout: 5 * time.Second}
 
 	go func() {
 		slog.Info("Agent health server listening", slog.String("port", port))
@@ -286,6 +282,9 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 					slog.Float64("confidence", rec.ConfidenceScore))
 				approvedRecs = append(approvedRecs, rec)
 			}
+		}
+		if err := store.SaveRecommendations(ctx, recs); err != nil {
+			slog.Error("Failed to persist recommendations", slog.Any("error", err))
 		}
 	}
 

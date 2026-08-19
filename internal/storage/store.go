@@ -15,6 +15,15 @@ type Store interface {
 	// GetSnapshots retrieves snapshots that occurred after the specified time.
 	GetSnapshots(ctx context.Context, since time.Time) ([]*model.ClusterSnapshot, error)
 
+	// GetLatestSnapshot retrieves the most recently collected cluster snapshot.
+	GetLatestSnapshot(ctx context.Context) (*model.ClusterSnapshot, error)
+
+	// SaveRecommendations persists validated recommendations.
+	SaveRecommendations(ctx context.Context, recommendations []*model.Recommendation) error
+
+	// GetRecommendations retrieves the newest recommendations, optionally filtered by status.
+	GetRecommendations(ctx context.Context, status string, limit int) ([]*model.Recommendation, error)
+
 	// Close cleanly closes the storage connection.
 	Close() error
 }
