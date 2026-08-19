@@ -12,3 +12,7 @@ agent.exe
 # Local-only
 .agents/
 CONTRIBUTING.md
+
+# Go caches
+.gocache/
+.gomodcache/
