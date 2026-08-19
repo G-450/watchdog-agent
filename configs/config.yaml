@@ -32,5 +32,6 @@ storage:
 ai_service:
   url: "http://localhost:8000"
 
-control_plane:
-  url: "http://localhost:3000"
+api:
+  allowed_origins:
+    - "http://localhost:3000"
