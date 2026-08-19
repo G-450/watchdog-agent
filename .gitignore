@@ -6,3 +6,5 @@ __pycache__/
 .agents/
 CONTRIBUTING.md
 agent.exe
+.gocache/
+.gomodcache/

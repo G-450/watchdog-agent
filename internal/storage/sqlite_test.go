@@ -68,7 +68,7 @@ func TestSQLiteStore(t *testing.T) {
 	if retrieved.TotalCost != 15.5 {
 		t.Errorf("Expected total cost 15.5, got %f", retrieved.TotalCost)
 	}
-	
+
 	if len(retrieved.Namespaces) != 1 {
 		t.Fatalf("Expected 1 namespace, got %d", len(retrieved.Namespaces))
 	}
@@ -89,5 +89,25 @@ func TestSQLiteStore(t *testing.T) {
 
 	if wl.Replicas != 2 {
 		t.Errorf("Expected 2 replicas, got %d", wl.Replicas)
+	}
+
+	latest, err := store.GetLatestSnapshot(ctx)
+	if err != nil || latest == nil || latest.Nodes != 3 {
+		t.Fatalf("Failed to retrieve latest snapshot: %+v, %v", latest, err)
+	}
+
+	recommendations := []*model.Recommendation{{
+		Target: "default/my-app", Status: "Approved", ExpectedSavings: 1.25,
+		ConfidenceScore: 0.9, Timestamp: now,
+	}}
+	if err := store.SaveRecommendations(ctx, recommendations); err != nil {
+		t.Fatalf("Failed to save recommendations: %v", err)
+	}
+	storedRecommendations, err := store.GetRecommendations(ctx, "Approved", 10)
+	if err != nil || len(storedRecommendations) != 1 {
+		t.Fatalf("Failed to retrieve recommendations: %v", err)
+	}
+	if storedRecommendations[0].ID == 0 || storedRecommendations[0].ExpectedSavings != 1.25 {
+		t.Fatalf("Unexpected stored recommendation: %+v", storedRecommendations[0])
 	}
 }

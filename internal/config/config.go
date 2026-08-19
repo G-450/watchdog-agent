@@ -51,6 +51,11 @@ type AIServiceConfig struct {
 	URL string `yaml:"url"`
 }
 
+// APIConfig holds dashboard API configuration.
+type APIConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
 type Config struct {
 	Agent      AgentConfig      `yaml:"agent"`
 	Prometheus PrometheusConfig `yaml:"prometheus"`
@@ -59,6 +64,7 @@ type Config struct {
 	Logging    LoggingConfig    `yaml:"logging"`
 	Storage    StorageConfig    `yaml:"storage"`
 	AIService  AIServiceConfig  `yaml:"ai_service"`
+	API        APIConfig        `yaml:"api"`
 }
 
 // Load reads the configuration from the given path.
@@ -142,6 +148,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if val := os.Getenv("WATCHDOG_AI_SERVICE_URL"); val != "" {
 		config.AIService.URL = val
+	}
+	if val := os.Getenv("WATCHDOG_API_ALLOWED_ORIGINS"); val != "" {
+		config.API.AllowedOrigins = strings.Split(val, ",")
 	}
 }
 
