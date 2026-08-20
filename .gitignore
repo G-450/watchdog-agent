@@ -8,3 +8,4 @@ CONTRIBUTING.md
 agent.exe
 .gocache/
 .gomodcache/
+.tmp-go-cache/
