@@ -16,3 +16,4 @@ CONTRIBUTING.md
 # Go caches
 .gocache/
 .gomodcache/
+.tmp-go-cache/
