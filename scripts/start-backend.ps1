@@ -21,7 +21,7 @@ $agentRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $agentRoot
 $aiServiceRoot = Join-Path $agentRoot "ai-service"
 $requirementsPath = Join-Path $aiServiceRoot "requirements.txt"
-$venvRoot = Join-Path $aiServiceRoot ".venv"
+$venvRoot = Join-Path $agentRoot ".venv"
 $venvPython = Join-Path $venvRoot "Scripts\python.exe"
 
 function Get-RequiredCommand {
@@ -143,20 +143,7 @@ foreach ($port in @(9090, 9003, 8000, 8081)) {
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    if ($SkipDependencyInstall) {
-        throw "Python virtual environment not found at '$venvRoot'. Rerun without -SkipDependencyInstall."
-    }
-
-    $pythonLauncher = Get-RequiredCommand -Names @("py", "python")
-    Write-Host "Creating the AI service virtual environment..." -ForegroundColor Cyan
-    if ([System.IO.Path]::GetFileNameWithoutExtension($pythonLauncher) -eq "py") {
-        & $pythonLauncher -3.11 -m venv $venvRoot
-    } else {
-        & $pythonLauncher -m venv $venvRoot
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create the Python virtual environment. Python 3.11+ is required."
-    }
+    throw "Existing Python virtual environment not found at '$venvRoot'. Expected interpreter: '$venvPython'."
 }
 
 & $venvPython -c "import fastapi, uvicorn, langgraph, langchain, pandas, pydantic" 2>$null
