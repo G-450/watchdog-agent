@@ -85,7 +85,7 @@ Useful options:
 .\scripts\start-backend.ps1 -Stop
 ```
 
-The first run creates `ai-service/.venv` and installs its Python dependencies. Use `-SkipDependencyInstall` only after that environment is ready.
+The launcher uses the existing repository-level `.venv` and installs missing AI-service dependencies into it. It never creates or replaces the virtual environment. Use `-SkipDependencyInstall` when the environment already contains all required packages.
 
 ## Contributing
 Please see `CONTRIBUTING.md` (local only) for details on our development process, branching strategy, and code conventions.
