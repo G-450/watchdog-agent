@@ -64,6 +64,29 @@ The agent serves the following read-only endpoints on its configured port:
 
 Browser origins must be explicitly listed under `api.allowed_origins`.
 
+## Start the Local Backend with psmux
+
+On Windows with PowerShell 7 and [psmux](https://github.com/psmux/psmux), start Prometheus and OpenCost port-forwards, the Python AI service, and the Go agent in one named session:
+
+```powershell
+.\scripts\start-backend.ps1
+```
+
+Useful options:
+
+```powershell
+# Rebuild an existing session
+.\scripts\start-backend.ps1 -Recreate
+
+# Start detached
+.\scripts\start-backend.ps1 -NoAttach
+
+# Stop all four backend windows
+.\scripts\start-backend.ps1 -Stop
+```
+
+The first run creates `ai-service/.venv` and installs its Python dependencies. Use `-SkipDependencyInstall` only after that environment is ready.
+
 ## Contributing
 Please see `CONTRIBUTING.md` (local only) for details on our development process, branching strategy, and code conventions.
 
