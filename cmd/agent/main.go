@@ -61,7 +61,11 @@ func main() {
 	defer store.Close()
 
 	aiClient := reasoning.NewClient(cfg)
-	policyValidator := policy.NewLocalValidator()
+	policyValidator := policy.NewCompositeValidator(
+		policy.NewLocalValidator(),
+		policy.NewOPAPolicyValidator(""),
+		policy.NewKyvernoPolicyValidator(),
+	)
 
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
