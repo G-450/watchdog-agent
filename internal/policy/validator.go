@@ -65,6 +65,7 @@ func (v *LocalValidator) Validate(rec *model.Recommendation) error {
 
 	rec.Status = "Approved"
 	rec.RejectionReason = ""
+	rec.RuleTrace = append(rec.RuleTrace, "LocalPolicyEvaluated:Approved")
 	return nil
 }
 
@@ -74,9 +75,33 @@ func (v *LocalValidator) reject(rec *model.Recommendation, reason string) error 
 	return fmt.Errorf("policy violation: %s", reason)
 }
 
+// isProductionWorkload determines whether a recommendation target corresponds to a production workload.
+// It parses the target into namespace and workload components to avoid false positives on names like 'product-catalog'.
+func isProductionWorkload(target string) bool {
+	cleaned := strings.Trim(target, "/")
+	parts := strings.Split(cleaned, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return false
+	}
+
+	ns := parts[0]
+	if ns == "prod" || ns == "production" || strings.HasPrefix(ns, "prod-") || strings.HasPrefix(ns, "production-") {
+		return true
+	}
+
+	if len(parts) > 1 {
+		workload := parts[1]
+		if workload == "prod" || workload == "production" || strings.HasPrefix(workload, "prod-") || strings.HasPrefix(workload, "production-") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // OPAPolicyValidator is an enterprise stub simulating Open Policy Agent (OPA) / Rego evaluations.
 type OPAPolicyValidator struct {
-	Endpoint           string
+	Endpoint           string // TODO: Implement actual HTTP call to Endpoint
 	MinConfidenceScore float64
 	StrictFinOpsRules  bool
 }
@@ -95,6 +120,8 @@ func NewOPAPolicyValidator(endpoint string) *OPAPolicyValidator {
 
 // Validate evaluates the recommendation against simulated OPA Rego admission criteria.
 func (o *OPAPolicyValidator) Validate(rec *model.Recommendation) error {
+	// TODO: Implement actual HTTP call to Endpoint
+
 	// Confidence score admission threshold
 	if rec.ConfidenceScore < o.MinConfidenceScore {
 		rec.Status = "Rejected"
@@ -103,7 +130,7 @@ func (o *OPAPolicyValidator) Validate(rec *model.Recommendation) error {
 	}
 
 	// Production safeguarding Rego rule
-	if strings.HasPrefix(rec.Target, "prod-") || strings.Contains(rec.Target, "/prod") {
+	if isProductionWorkload(rec.Target) {
 		var proposedState map[string]interface{}
 		if err := json.Unmarshal([]byte(rec.ProposedState), &proposedState); err == nil {
 			if reps, ok := proposedState["replicas"].(float64); ok && int(reps) < 3 {
@@ -166,5 +193,7 @@ func (c *CompositeValidator) Validate(rec *model.Recommendation) error {
 			return err
 		}
 	}
+	rec.Status = "Approved"
+	rec.RejectionReason = ""
 	return nil
 }
