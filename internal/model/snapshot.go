@@ -28,19 +28,19 @@ type WorkloadSnapshot struct {
 	Type      string `json:"type"` // e.g., Deployment, StatefulSet
 	Replicas  int32  `json:"replicas"`
 
-	// Resources (requests and limits from K8s API)
+	// Resources (requests and limits from K8s API), per replica
 	CPURequests float64 `json:"cpu_requests"` // in cores
 	CPULimits   float64 `json:"cpu_limits"`
 	MemRequests int64   `json:"mem_requests"` // in bytes
 	MemLimits   int64   `json:"mem_limits"`
 
-	// Utilization (from Telemetry)
-	CPUUsage   float64 `json:"cpu_usage"`
-	MemUsage   float64 `json:"mem_usage"`
-	NetRxUsage float64 `json:"net_rx_usage"`
-	NetTxUsage float64 `json:"net_tx_usage"`
+	// Utilization (from Telemetry), summed across all replicas
+	CPUUsage   float64 `json:"cpu_usage"`    // in cores
+	MemUsage   float64 `json:"mem_usage"`    // in bytes
+	NetRxUsage float64 `json:"net_rx_usage"` // in bytes per second
+	NetTxUsage float64 `json:"net_tx_usage"` // in bytes per second
 
-	// Cost (from FinOps)
+	// Cost (from FinOps), projected to a monthly run-rate in USD
 	TotalCost float64 `json:"total_cost"`
 
 	// Exclusion Status
@@ -49,4 +49,11 @@ type WorkloadSnapshot struct {
 
 	// Dependencies
 	ServiceDependencies []string `json:"service_dependencies"`
+}
+
+// SnapshotSummary is the lightweight view of a cluster snapshot used for cost trends.
+type SnapshotSummary struct {
+	Timestamp time.Time `json:"timestamp"`
+	Nodes     int       `json:"nodes"`
+	TotalCost float64   `json:"total_cost"`
 }

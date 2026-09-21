@@ -8,11 +8,11 @@ from forecaster import generate_multi_horizon_forecast, generate_forecast
 
 def test_generate_multi_horizon_forecast_basic():
     workload = {
-        "CPUUsage": 1.0,
-        "MemUsage": 1024.0,
-        "CPURequests": 2.0,
-        "MemRequests": 2048.0,
-        "Replicas": 2
+        "cpu_usage": 1.0,
+        "mem_usage": 1024.0,
+        "cpu_requests": 2.0,
+        "mem_requests": 2048.0,
+        "replicas": 2
     }
     
     forecast = generate_multi_horizon_forecast(workload)
@@ -42,10 +42,10 @@ def test_forecaster_with_historical_series():
     mem_history = [200.0, 220.0, 240.0, 260.0, 280.0, 300.0]
     
     workload = {
-        "CPUUsage": 0.5,
-        "MemUsage": 300.0,
-        "CPUHistory": cpu_history,
-        "MemHistory": mem_history
+        "cpu_usage": 0.5,
+        "mem_usage": 300.0,
+        "cpu_history": cpu_history,
+        "mem_history": mem_history
     }
     
     forecast = generate_multi_horizon_forecast(workload)
@@ -56,14 +56,14 @@ def test_forecaster_with_historical_series():
 
 def test_forecaster_edge_cases():
     # Zero usage workload
-    zero_workload = {"CPUUsage": 0.0, "MemUsage": 0.0}
+    zero_workload = {"cpu_usage": 0.0, "mem_usage": 0.0}
     zero_forecast = generate_multi_horizon_forecast(zero_workload)
     assert zero_forecast["expected_peak_cpu"] == 0.0
     assert zero_forecast["expected_peak_mem"] == 0.0
     assert zero_forecast["confidence"] > 0.0
 
 def test_backwards_compatible_generate_forecast():
-    workload = {"CPUUsage": 0.5, "MemUsage": 512.0}
+    workload = {"cpu_usage": 0.5, "mem_usage": 512.0}
     forecast = generate_forecast(workload)
     assert forecast["expected_peak_cpu"] > 0.5
     assert forecast["expected_peak_mem"] > 512.0

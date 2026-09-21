@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/model"
 )
 
@@ -263,5 +264,70 @@ func TestCompositeValidator(t *testing.T) {
 	}
 	if noLocalRec.RejectionReason != "" {
 		t.Errorf("Expected empty RejectionReason, got %s", noLocalRec.RejectionReason)
+	}
+}
+
+func TestLocalValidator_Regressions(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		current    string
+		proposed   string
+		wantStatus string
+	}{
+		{"workload named after an excluded namespace is allowed", "default/monitoring-exporter", `{"cpu_requests":1.0,"replicas":3}`, `{"cpu_requests":0.8,"replicas":3}`, "Approved"},
+		{"namespace containing an excluded name is allowed", "watchdog-demo/api", `{"cpu_requests":1.0,"replicas":3}`, `{"cpu_requests":0.8,"replicas":3}`, "Approved"},
+		{"excluded namespace is still rejected", "monitoring/grafana", `{"cpu_requests":1.0,"replicas":3}`, `{"cpu_requests":0.8,"replicas":3}`, "Rejected"},
+		{"step-down exactly at the limit passes despite rounding", "default/api", `{"cpu_requests":0.3,"replicas":3}`, `{"cpu_requests":0.21,"replicas":3}`, "Approved"},
+		{"step-down above the limit is rejected", "default/api", `{"cpu_requests":1.0,"replicas":3}`, `{"cpu_requests":0.69,"replicas":3}`, "Rejected"},
+		{"CPU change on a single-replica workload keeps its replica count", "default/api", `{"cpu_requests":0.5,"replicas":1}`, `{"cpu_requests":0.35,"replicas":1}`, "Approved"},
+		{"removing replicas below the floor is rejected", "default/api", `{"cpu_requests":0.5,"replicas":2}`, `{"cpu_requests":0.5,"replicas":1}`, "Rejected"},
+	}
+	validator := NewLocalValidator()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &model.Recommendation{Target: tt.target, CurrentState: tt.current, ProposedState: tt.proposed}
+			validator.Validate(rec)
+			if rec.Status != tt.wantStatus {
+				t.Errorf("status = %s (%s), want %s", rec.Status, rec.RejectionReason, tt.wantStatus)
+			}
+			if tt.wantStatus == "Rejected" && rec.RuleTrace[len(rec.RuleTrace)-1] != "LocalPolicyEvaluated:Rejected" {
+				t.Errorf("rejection not recorded in rule trace: %v", rec.RuleTrace)
+			}
+		})
+	}
+}
+
+func TestNewFromConfig(t *testing.T) {
+	validator := NewFromConfig(config.PolicyConfig{
+		MinReplicas: 2, MaxStepDownPercent: 0.30, MinConfidence: 0.90, MinCPURequest: 0.10,
+		ExcludedNamespaces: []string{"payments"},
+	})
+	tests := []struct {
+		name       string
+		rec        model.Recommendation
+		wantStatus string
+	}{
+		{"configured namespace is excluded", model.Recommendation{Target: "payments/api", ConfidenceScore: 0.95, CurrentState: `{}`, ProposedState: `{}`}, "Rejected"},
+		{"configured confidence threshold applies", model.Recommendation{Target: "default/api", ConfidenceScore: 0.85, CurrentState: `{}`, ProposedState: `{}`}, "Rejected"},
+		{"configured CPU floor applies", model.Recommendation{Target: "default/api", ConfidenceScore: 0.95, CurrentState: `{"cpu_requests":0.12}`, ProposedState: `{"cpu_requests":0.09}`}, "Rejected"},
+		{"compliant recommendation is approved", model.Recommendation{Target: "default/api", ConfidenceScore: 0.95, CurrentState: `{"cpu_requests":1.0}`, ProposedState: `{"cpu_requests":0.8}`}, "Approved"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := tt.rec
+			validator.Validate(&rec)
+			if rec.Status != tt.wantStatus {
+				t.Errorf("status = %s (%s), want %s", rec.Status, rec.RejectionReason, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestOPAPolicyValidator_ProductionCPUChangeKeepsReplicas(t *testing.T) {
+	rec := &model.Recommendation{Target: "prod/api", ConfidenceScore: 0.9,
+		CurrentState: `{"cpu_requests":1.0,"replicas":2}`, ProposedState: `{"cpu_requests":0.8,"replicas":2}`}
+	if err := NewOPAPolicyValidator("").Validate(rec); err != nil {
+		t.Errorf("a CPU change that keeps the replica count should pass: %v", err)
 	}
 }

@@ -7,33 +7,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
 	"watchdog-agent/internal/config"
 )
 
-// DeploymentCost represents the cost of a deployment.
-type DeploymentCost struct {
-	TotalCost float64
-	CPUCost   float64
-	RAMCost   float64
-	GPUCost   float64
-}
-
-// NamespaceCost represents the cost of an entire namespace.
-type NamespaceCost struct {
-	TotalCost float64
-	CPUCost   float64
-	RAMCost   float64
-	GPUCost   float64
-}
-
-// ClusterCost represents the aggregated cost for the cluster.
-type ClusterCost struct {
-	TotalCost float64
-	CPUCost   float64
-	RAMCost   float64
-	GPUCost   float64
-}
+// minutesPerMonth matches OpenCost's 730-hour month.
+const minutesPerMonth = 730 * 60
 
 // Client handles communication with the OpenCost API for real-time pricing data.
 type Client struct {
@@ -55,110 +36,111 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-// openCostResponse represents the structure of the OpenCost API response.
-type openCostResponse struct {
-	Code int `json:"code"`
-	Data []map[string]struct {
-		TotalCost float64 `json:"totalCost"`
-		CPUCost   float64 `json:"cpuCost"`
-		RAMCost   float64 `json:"ramCost"`
-		GPUCost   float64 `json:"gpuCost"`
-	} `json:"data"`
+// Allocations holds monthly run-rate costs (USD) per pod, keyed by namespace then pod name.
+type Allocations struct {
+	pods map[string]map[string]float64
 }
 
-// executeQuery makes an HTTP GET request to the OpenCost API and aggregates the result.
-func (c *Client) executeQuery(ctx context.Context, window, aggregate, filter string) (float64, float64, float64, float64, error) {
-	reqURL, err := url.Parse(c.config.OpenCost.URL + "/allocation/compute")
-	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("invalid opencost url: %w", err)
+// ClusterCost returns the monthly run-rate of every allocation, including idle and unallocated cost.
+func (a *Allocations) ClusterCost() float64 {
+	var total float64
+	for _, pods := range a.pods {
+		for _, cost := range pods {
+			total += cost
+		}
 	}
+	return total
+}
 
-	q := reqURL.Query()
-	q.Set("window", window)
-	q.Set("aggregate", aggregate)
-	if filter != "" {
-		q.Set("filter", filter)
+// NamespaceCost returns the monthly run-rate of all pods in a namespace.
+func (a *Allocations) NamespaceCost(namespace string) float64 {
+	var total float64
+	for _, cost := range a.pods[namespace] {
+		total += cost
 	}
+	return total
+}
+
+// WorkloadCost returns the monthly run-rate of the pods in a namespace accepted by owns.
+func (a *Allocations) WorkloadCost(namespace string, owns func(pod string) bool) float64 {
+	var total float64
+	for pod, cost := range a.pods[namespace] {
+		if owns(pod) {
+			total += cost
+		}
+	}
+	return total
+}
+
+type allocation struct {
+	TotalCost  float64 `json:"totalCost"`
+	Minutes    float64 `json:"minutes"`
+	Properties struct {
+		Namespace string `json:"namespace"`
+		Pod       string `json:"pod"`
+	} `json:"properties"`
+}
+
+type allocationResponse struct {
+	Code    int                     `json:"code"`
+	Message string                  `json:"message"`
+	Data    []map[string]allocation `json:"data"`
+}
+
+// GetAllocations fetches pod-level cost over the configured window in a single request.
+// OpenCost ignores allocation filters in the deployed version, so namespace and workload
+// costs are derived from the pod breakdown instead of separate filtered queries.
+func (c *Client) GetAllocations(ctx context.Context) (*Allocations, error) {
+	reqURL, err := url.Parse(strings.TrimRight(c.config.OpenCost.URL, "/") + "/allocation/compute")
+	if err != nil {
+		return nil, fmt.Errorf("invalid opencost url: %w", err)
+	}
+	q := reqURL.Query()
+	q.Set("window", c.config.OpenCost.Window)
+	q.Set("aggregate", "namespace,pod")
+	q.Set("accumulate", "true")
 	reqURL.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("opencost request failed: %w", err)
+		return nil, fmt.Errorf("opencost request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, 0, 0, 0, fmt.Errorf("opencost returned status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("opencost returned status: %d", resp.StatusCode)
 	}
-
-	var result openCostResponse
+	var result allocationResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("failed to decode opencost response: %w", err)
+		return nil, fmt.Errorf("failed to decode opencost response: %w", err)
+	}
+	if result.Code != http.StatusOK {
+		return nil, fmt.Errorf("opencost API error code %d: %s", result.Code, result.Message)
 	}
 
-	if result.Code != 200 {
-		return 0, 0, 0, 0, fmt.Errorf("opencost API error code: %d", result.Code)
+	allocations := &Allocations{pods: make(map[string]map[string]float64)}
+	for _, set := range result.Data {
+		for key, item := range set {
+			namespace, pod := item.Properties.Namespace, item.Properties.Pod
+			if namespace == "" || pod == "" {
+				// Idle and unallocated entries carry no pod; keep them in the cluster total only.
+				namespace, pod = "", key
+			}
+			if item.Minutes <= 0 {
+				continue
+			}
+			if allocations.pods[namespace] == nil {
+				allocations.pods[namespace] = make(map[string]float64)
+			}
+			allocations.pods[namespace][pod] += item.TotalCost / item.Minutes * minutesPerMonth
+		}
 	}
-
-	if len(result.Data) == 0 || len(result.Data[0]) == 0 {
-		slog.Warn("OpenCost returned empty data", slog.String("query", reqURL.String()))
-		return 0, 0, 0, 0, nil
+	if len(allocations.pods) == 0 {
+		slog.Warn("OpenCost returned no allocations", slog.String("window", c.config.OpenCost.Window))
 	}
-
-	var total, cpu, ram, gpu float64
-	// Aggregate across all keys in the data[0] map
-	for _, item := range result.Data[0] {
-		total += item.TotalCost
-		cpu += item.CPUCost
-		ram += item.RAMCost
-		gpu += item.GPUCost
-	}
-
-	return total, cpu, ram, gpu, nil
-}
-
-// GetNamespaceCost aggregates cost for an entire namespace.
-func (c *Client) GetNamespaceCost(ctx context.Context, namespace, window string) (*NamespaceCost, error) {
-	filter := fmt.Sprintf(`namespace:"%s"`, namespace)
-	total, cpu, ram, gpu, err := c.executeQuery(ctx, window, "namespace", filter)
-	if err != nil {
-		return nil, err
-	}
-	return &NamespaceCost{TotalCost: total, CPUCost: cpu, RAMCost: ram, GPUCost: gpu}, nil
-}
-
-// GetClusterCost aggregates cost for the whole cluster.
-func (c *Client) GetClusterCost(ctx context.Context, window string) (*ClusterCost, error) {
-	total, cpu, ram, gpu, err := c.executeQuery(ctx, window, "cluster", "")
-	if err != nil {
-		return nil, err
-	}
-	return &ClusterCost{TotalCost: total, CPUCost: cpu, RAMCost: ram, GPUCost: gpu}, nil
-}
-
-// GetDeploymentCost aggregates cost for a specific deployment.
-func (c *Client) GetDeploymentCost(ctx context.Context, namespace, deployment, window string) (*DeploymentCost, error) {
-	filter := fmt.Sprintf(`namespace:"%s"`, namespace)
-	// OpenCost allows filtering by controller, but it depends on the exact labels.
-	// We will query by namespace and filter the result map in `executeQuery` but wait,
-	// if we aggregate by controller it returns the deployment cost.
-	total, cpu, ram, gpu, err := c.executeQuery(ctx, window, "controller", filter)
-	if err != nil {
-		return nil, err
-	}
-	// Note: The execution above aggregates ALL controllers in the namespace since our filter
-	// is just the namespace. We need to filter exactly to the deployment.
-	// To fix this without complex filters, we will add controller filtering:
-	// OpenCost supports `controller:"name"`.
-	filter = fmt.Sprintf(`namespace:"%s"+controller:"%s"`, namespace, deployment)
-	total, cpu, ram, gpu, err = c.executeQuery(ctx, window, "controller", filter)
-	if err != nil {
-		return nil, err
-	}
-	return &DeploymentCost{TotalCost: total, CPUCost: cpu, RAMCost: ram, GPUCost: gpu}, nil
+	return allocations, nil
 }

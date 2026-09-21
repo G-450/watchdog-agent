@@ -26,12 +26,12 @@ def test_api_forecast_endpoint():
     payload = {
         "name": "cartservice",
         "namespace": "online-boutique",
-        "CPUUsage": 0.45,
-        "MemUsage": 512000000.0,
-        "CPURequests": 1.0,
-        "MemRequests": 1024000000.0,
-        "Replicas": 3,
-        "CPUHistory": [0.35, 0.38, 0.40, 0.42, 0.45]
+        "cpu_usage": 0.45,
+        "mem_usage": 512000000.0,
+        "cpu_requests": 1.0,
+        "mem_requests": 1024000000.0,
+        "replicas": 3,
+        "cpu_history": [0.35, 0.38, 0.40, 0.42, 0.45]
     }
     
     response = client.post("/api/v1/forecast", json=payload)
@@ -55,13 +55,13 @@ def test_api_analyze_endpoint():
         "total_cost": 150.0,
         "namespaces": {
             "default": {
-                "Workloads": {
+                "workloads": {
                     "frontend": {
-                        "CPUUsage": 0.08,
-                        "CPURequests": 1.0,
-                        "MemUsage": 100000000.0,
-                        "MemRequests": 1000000000.0,
-                        "Replicas": 4
+                        "cpu_usage": 0.08,
+                        "cpu_requests": 1.0,
+                        "mem_usage": 100000000.0,
+                        "mem_requests": 1000000000.0,
+                        "replicas": 4
                     }
                 }
             }

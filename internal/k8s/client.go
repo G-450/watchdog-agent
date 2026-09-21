@@ -105,6 +105,14 @@ func (c *Client) ClassifyWorkload(deployment *appsv1.Deployment) WorkloadType {
 	return WorkloadTypeDeployment
 }
 
+// ExcludeAnnotation opts a namespace or workload out of optimization when set to "true".
+const ExcludeAnnotation = "watchdog.finops.io/exclude"
+
+// IsWorkloadExcluded reports whether a workload's own annotations opt it out of optimization.
+func IsWorkloadExcluded(annotations map[string]string) bool {
+	return annotations[ExcludeAnnotation] == "true"
+}
+
 // IsExcluded checks if a workload in the given namespace should be excluded.
 func (c *Client) IsExcluded(namespace string, annotations map[string]string) bool {
 	// Check namespace exclusions
@@ -115,7 +123,7 @@ func (c *Client) IsExcluded(namespace string, annotations map[string]string) boo
 	}
 
 	// Check annotation exclusion
-	if val, ok := annotations["watchdog.finops.io/exclude"]; ok && val == "true" {
+	if IsWorkloadExcluded(annotations) {
 		return true
 	}
 
