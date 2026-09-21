@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getStore } from '@/lib/store';
 
 export async function GET() {
-  const store = getStore();
+  const store = await getStore();
   
   // Format the data for the frontend
   const clusters = Object.keys(store).map((key) => {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -130,6 +131,7 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 
 	clusterSnap := &model.ClusterSnapshot{
 		Timestamp:  startTime,
+		ClusterID:  cfg.Agent.Name,
 		Namespaces: make(map[string]*model.NamespaceSnapshot),
 	}
 
@@ -299,11 +301,13 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 		
 		jsonData, err := json.Marshal(payload)
 		if err == nil {
-			resp, err := http.Post(cfg.ControlPlane.URL+"/api/ingest", "application/json", bytes.NewBuffer(jsonData))
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Post(cfg.ControlPlane.URL+"/api/ingest", "application/json", bytes.NewBuffer(jsonData))
 			if err != nil {
 				slog.Warn("Failed to send data to Control Plane", slog.Any("error", err))
 			} else {
-				resp.Body.Close()
+				defer resp.Body.Close()
+				io.Copy(io.Discard, resp.Body)
 				slog.Info("Successfully sent data to Control Plane", slog.Int("status", resp.StatusCode))
 			}
 		} else {

@@ -5,16 +5,13 @@ export async function POST(request: Request) {
   try {
     const data = await request.json();
     
-    // In a real application, cluster ID might come from auth or payload.
-    // We'll use a default or infer from namespaces if available.
     let clusterId = 'cluster-default';
     
-    if (data.snapshot && data.snapshot.namespaces) {
-      // Just a simple way to uniquely identify for now
-      clusterId = 'cluster-' + Object.keys(data.snapshot.namespaces).length + '-ns';
+    if (data.snapshot && data.snapshot.cluster_id) {
+      clusterId = data.snapshot.cluster_id;
     }
 
-    updateClusterData(clusterId, data.snapshot, data.recommendations);
+    await updateClusterData(clusterId, data.snapshot, data.recommendations);
     
     console.log(`[Ingest API] Received data for cluster: ${clusterId}`);
     return NextResponse.json({ success: true, clusterId });
