@@ -33,7 +33,7 @@ func main() {
 	fmt.Println("Recent Workload Snapshots:")
 	fmt.Printf("%-20s %-20s %-30s %-10s %-10s\n", "TIMESTAMP", "NAMESPACE", "WORKLOAD", "REPLICAS", "CPU USAGE")
 	fmt.Println("--------------------------------------------------------------------------------------------------")
-	
+
 	rows, err := db.Query("SELECT timestamp, namespace, name, replicas, cpu_usage FROM workload_snapshots ORDER BY id DESC LIMIT 10")
 	if err != nil {
 		log.Fatalf("Failed to query workload_snapshots: %v", err)

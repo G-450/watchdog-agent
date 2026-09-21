@@ -54,6 +54,7 @@ func NewClient(cfg *config.Config) *Client {
 		},
 	}
 }
+
 // openCostResponse represents the structure of the OpenCost API response.
 type openCostResponse struct {
 	Code int `json:"code"`
