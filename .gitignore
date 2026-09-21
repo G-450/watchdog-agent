@@ -17,3 +17,8 @@ CONTRIBUTING.md
 .gocache/
 .gomodcache/
 .tmp-go-cache/
+
+# Local config and secrets
+.env
+.env.local
+configs/config.local.yaml
