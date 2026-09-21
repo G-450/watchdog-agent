@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-09-21T12:00:00Z",
+  "cluster_id": "watchdog-agent-01",
+  "nodes": 2,
+  "namespaces": {
+    "monitoring": {
+      "name": "monitoring",
+      "workloads": {
+        "grafana": {
+          "name": "grafana",
+          "namespace": "monitoring",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 1,
+          "cpu_limits": 0,
+          "mem_requests": 536870912,
+          "mem_limits": 0,
+          "cpu_usage": 0.01,
+          "mem_usage": 104857600,
+          "net_rx_usage": 0,
+          "net_tx_usage": 0,
+          "total_cost": 40,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": null,
+          "cpu_history": [],
+          "mem_history": []
+        }
+      },
+      "namespace_cost": 40
+    },
+    "shop": {
+      "name": "shop",
+      "workloads": {
+        "api": {
+          "name": "api",
+          "namespace": "shop",
+          "type": "Deployment",
+          "replicas": 3,
+          "cpu_requests": 1,
+          "cpu_limits": 2,
+          "mem_requests": 1073741824,
+          "mem_limits": 2147483648,
+          "cpu_usage": 0.6,
+          "mem_usage": 943718400,
+          "net_rx_usage": 2048,
+          "net_tx_usage": 1024,
+          "total_cost": 60,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "api"
+          ],
+          "cpu_history": [
+            0.55,
+            0.58,
+            0.6,
+            0.57,
+            0.62,
+            0.59,
+            0.6,
+            0.61
+          ],
+          "mem_history": [
+            920000000,
+            930000000,
+            940000000,
+            930000000,
+            940000000,
+            940000000,
+            940000000,
+            940000000
+          ]
+        },
+        "checkout": {
+          "name": "checkout",
+          "namespace": "shop",
+          "type": "Deployment",
+          "replicas": 2,
+          "cpu_requests": 0.5,
+          "cpu_limits": 1,
+          "mem_requests": 536870912,
+          "mem_limits": 1073741824,
+          "cpu_usage": 0.95,
+          "mem_usage": 629145600,
+          "net_rx_usage": 0,
+          "net_tx_usage": 0,
+          "total_cost": 20,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": null,
+          "cpu_history": [
+            0.9,
+            0.92,
+            0.95,
+            0.94,
+            0.96,
+            0.95
+          ],
+          "mem_history": [
+            620000000,
+            630000000,
+            630000000,
+            630000000,
+            630000000,
+            630000000
+          ]
+        }
+      },
+      "namespace_cost": 80
+    }
+  },
+  "total_cost": 120
+}

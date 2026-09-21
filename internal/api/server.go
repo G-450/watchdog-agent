@@ -73,7 +73,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "no_snapshots", "no cluster snapshots have been collected")
 		return
 	}
-	recommendations, err := s.store.GetRecommendations(r.Context(), "", 100)
+	recommendations, err := s.store.GetRecommendations(r.Context(), storage.RecommendationQuery{LatestOnly: true, Limit: 500})
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "storage_unavailable", err.Error())
 		return
@@ -86,7 +86,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, recommendation := range recommendations {
 		status := strings.ToLower(recommendation.Status)
-		if status != "rejected" {
+		// Only changes that passed policy count as achievable savings.
+		if status == "approved" {
 			potentialSavings += recommendation.ExpectedSavings
 		}
 		counts[status]++
@@ -109,16 +110,12 @@ func (s *Server) snapshots(w http.ResponseWriter, r *http.Request) {
 		}
 		since = parsed
 	}
-	snapshots, err := s.store.GetSnapshots(r.Context(), since)
+	summaries, err := s.store.GetSnapshotSummaries(r.Context(), since, parseLimit(r, 100))
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "storage_unavailable", err.Error())
 		return
 	}
-	limit := parseLimit(r, 100)
-	if len(snapshots) > limit {
-		snapshots = snapshots[len(snapshots)-limit:]
-	}
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{"items": snapshots, "count": len(snapshots)})
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"items": summaries, "count": len(summaries)})
 }
 
 func (s *Server) workloads(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +169,17 @@ func (s *Server) workload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recommendations(w http.ResponseWriter, r *http.Request) {
-	recommendations, err := s.store.GetRecommendations(r.Context(), r.URL.Query().Get("status"), parseLimit(r, 100))
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "latest"
+	}
+	if scope != "latest" && scope != "all" {
+		s.writeError(w, http.StatusBadRequest, "invalid_scope", "scope must be latest or all")
+		return
+	}
+	recommendations, err := s.store.GetRecommendations(r.Context(), storage.RecommendationQuery{
+		Status: r.URL.Query().Get("status"), Limit: parseLimit(r, 100), LatestOnly: scope == "latest",
+	})
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "storage_unavailable", err.Error())
 		return

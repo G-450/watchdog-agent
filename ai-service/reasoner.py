@@ -8,6 +8,21 @@ from forecaster import generate_multi_horizon_forecast
 CPU_COST_PER_CORE_MONTH = 24.0
 MEM_COST_PER_GB_MONTH = 3.2
 
+# A workload using less than this per replica is treated as idle.
+IDLE_CPU_CORES = 0.02
+IDLE_MEM_BYTES = 50 * 1024 ** 2
+
+def per_replica_view(workload: Dict[str, Any]) -> Dict[str, Any]:
+    """Converts usage summed across replicas into per-replica usage, matching per-replica requests."""
+    replicas = max(int(workload.get("replicas") or 1), 1)
+    view = dict(workload)
+    view["replicas"] = replicas
+    for key in ("cpu_usage", "mem_usage"):
+        view[key] = float(workload.get(key) or 0.0) / replicas
+    for key in ("cpu_history", "mem_history"):
+        view[key] = [float(v) / replicas for v in (workload.get(key) or [])]
+    return view
+
 class AgentState(TypedDict):
     workload_name: str
     namespace: str
@@ -18,7 +33,7 @@ class AgentState(TypedDict):
     recommendations: List[Dict[str, Any]]
 
 def forecast_node(state: AgentState) -> Dict[str, Any]:
-    """Generates multi-horizon time-series forecast for the workload."""
+    """Generates a multi-horizon forecast of per-replica demand for the workload."""
     forecast = generate_multi_horizon_forecast(state["workload"])
     return {"forecast": forecast}
 
@@ -27,11 +42,11 @@ def utilization_node(state: AgentState) -> Dict[str, Any]:
     wl = state["workload"]
     fc = state["forecast"]
     
-    cpu_req = float(wl.get("CPURequests") or 0.0)
-    cpu_lim = float(wl.get("CPULimits") or 0.0)
-    mem_req = float(wl.get("MemRequests") or 0.0)
-    mem_lim = float(wl.get("MemLimits") or 0.0)
-    replicas = int(wl.get("Replicas") or 1)
+    cpu_req = float(wl.get("cpu_requests") or 0.0)
+    cpu_lim = float(wl.get("cpu_limits") or 0.0)
+    mem_req = float(wl.get("mem_requests") or 0.0)
+    mem_lim = float(wl.get("mem_limits") or 0.0)
+    replicas = int(wl.get("replicas") or 1)
     
     expected_peak_cpu = fc.get("expected_peak_cpu", 0.0)
     expected_peak_mem = fc.get("expected_peak_mem", 0.0)
@@ -50,7 +65,7 @@ def utilization_node(state: AgentState) -> Dict[str, Any]:
         "expected_peak_mem": expected_peak_mem,
         "cpu_util_ratio": cpu_util_ratio,
         "mem_util_ratio": mem_util_ratio,
-        "is_idle": (expected_peak_cpu < 0.02 and expected_peak_mem < 50.0),
+        "is_idle": (expected_peak_cpu < IDLE_CPU_CORES and expected_peak_mem < IDLE_MEM_BYTES),
         "cpu_overprovisioned": (cpu_req > 0 and cpu_util_ratio < 0.50),
         "cpu_throttling_risk": (cpu_req > 0 and cpu_util_ratio >= 0.88),
         "mem_overprovisioned": (mem_req > 0 and mem_util_ratio < 0.50),
@@ -206,6 +221,7 @@ def policy_node(state: AgentState) -> Dict[str, Any]:
             
         rec = {
             "target": cand["target"],
+            "action": cand["action"],
             "current_state": cand["current_state"],
             "proposed_state": cand["proposed_state"],
             "expected_savings": cand["expected_savings"],
@@ -246,12 +262,14 @@ def analyze_workloads(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     namespaces = snapshot.get("namespaces", {})
     
     for ns_name, ns_data in namespaces.items():
-        workloads = ns_data.get("Workloads", {})
+        workloads = ns_data.get("workloads") or {}
         for wl_name, wl_data in workloads.items():
+            if wl_data.get("is_excluded"):
+                continue
             state = {
                 "workload_name": wl_name,
                 "namespace": ns_name,
-                "workload": wl_data,
+                "workload": per_replica_view(wl_data),
                 "forecast": {},
                 "utilization_profile": {},
                 "candidate_recommendations": [],
