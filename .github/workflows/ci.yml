@@ -17,7 +17,26 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: gofmt -d .
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "$unformatted"; gofmt -d .; exit 1; fi
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./...
+
+  ai-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ai-service/requirements.txt
+      - run: pip install -r requirements.txt
+      # Includes tests/test_contract.py, which reads the request fixture the Go tests generate.
+      - run: python -m pytest -q

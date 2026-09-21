@@ -8,12 +8,15 @@ agent:
   reconcile_interval: "60s"      # how often to run the collection loop
 
 prometheus:
-  url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+  url: "http://prometheus-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090"
   timeout: "5s"
+  history_window: "24h"          # usage history sent to the forecaster
+  history_step: "15m"            # resolution of that history
 
 opencost:
   url: "http://opencost.opencost.svc.cluster.local:9003"
   timeout: "5s"
+  window: "1d"                   # allocation window; costs are projected to a monthly run-rate
 
 kubernetes:
   namespace: ""                  # empty = all namespaces
@@ -31,6 +34,16 @@ storage:
 
 ai_service:
   url: "http://localhost:8000"
+
+policy:
+  min_replicas: 2
+  max_step_down_percent: 0.30    # largest CPU request reduction allowed in one change
+  min_confidence: 0.60
+  min_cpu_request: 0.05          # cores
+  excluded_namespaces:
+    - kube-system
+    - monitoring
+    - watchdog
 
 api:
   allowed_origins:
