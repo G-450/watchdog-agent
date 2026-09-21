@@ -30,10 +30,10 @@ def test_reasoner_overprovisioned_rightsizing():
             }
         }
     }
-    
+
     recs = analyze_workloads(snapshot)
     assert len(recs) >= 1
-    
+
     cpu_rec = next((r for r in recs if "OverProvisionedCPURule" in r["rule_trace"]), None)
     assert cpu_rec is not None
     assert cpu_rec["target"] == "default/overprovisioned-app"
@@ -59,10 +59,10 @@ def test_reasoner_underprovisioned_scale_up():
             }
         }
     }
-    
+
     recs = analyze_workloads(snapshot)
     assert len(recs) >= 1
-    
+
     safety_rec = next((r for r in recs if "UnderProvisionedCPURule" in r["rule_trace"]), None)
     assert safety_rec is not None
     assert safety_rec["target"] == "production/high-traffic-service"
@@ -83,7 +83,7 @@ def test_reasoner_replica_rightsizing():
             }
         }
     }
-    
+
     recs = analyze_workloads(snapshot)
     rep_rec = next((r for r in recs if "LowReplicaUtilizationRule" in r["rule_trace"]), None)
     assert rep_rec is not None
@@ -103,7 +103,7 @@ def test_reasoner_namespace_policy_rejection():
             }
         }
     }
-    
+
     recs = analyze_workloads(snapshot)
     for rec in recs:
         if rec["target"] == "kube-system/coredns":
