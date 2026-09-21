@@ -7,6 +7,7 @@ import (
 // ClusterSnapshot represents a single reconciliation cycle's snapshot.
 type ClusterSnapshot struct {
 	Timestamp   time.Time                     `json:"timestamp"`
+	ClusterID   string                        `json:"cluster_id"`
 	Nodes       int                           `json:"nodes"`
 	Namespaces  map[string]*NamespaceSnapshot `json:"namespaces"`
 	TotalCost   float64                       `json:"total_cost"`
