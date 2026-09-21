@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -264,8 +261,6 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 
 	// Send to AI Service
 	recs, err := aiClient.Analyze(ctx, clusterSnap)
-	
-	var approvedRecs []model.Recommendation
 	if err != nil {
 		slog.Warn("Failed to get recommendations from AI service", slog.Any("error", err))
 	} else {
@@ -280,41 +275,12 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 					slog.String("target", rec.Target),
 					slog.Float64("savings", rec.ExpectedSavings),
 					slog.Float64("confidence", rec.ConfidenceScore))
-				approvedRecs = append(approvedRecs, rec)
 			}
 		}
 		if err := store.SaveRecommendations(ctx, recs); err != nil {
 			slog.Error("Failed to persist recommendations", slog.Any("error", err))
 		}
 	}
-
-	// Send to Control Plane Dashboard
-	if cfg.ControlPlane.URL != "" {
-		payload := struct {
-			Snapshot       *model.ClusterSnapshot `json:"snapshot"`
-			Recommendations []model.Recommendation `json:"recommendations"`
-		}{
-			Snapshot:       clusterSnap,
-			Recommendations: approvedRecs,
-		}
-		
-		jsonData, err := json.Marshal(payload)
-		if err == nil {
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Post(cfg.ControlPlane.URL+"/api/ingest", "application/json", bytes.NewBuffer(jsonData))
-			if err != nil {
-				slog.Warn("Failed to send data to Control Plane", slog.Any("error", err))
-			} else {
-				defer resp.Body.Close()
-				io.Copy(io.Discard, resp.Body)
-				slog.Info("Successfully sent data to Control Plane", slog.Int("status", resp.StatusCode))
-			}
-		} else {
-			slog.Error("Failed to marshal payload for Control Plane", slog.Any("error", err))
-		}
-	}
-
-
 
 	slog.Info("--- Completed Reconciliation Cycle ---",
 		slog.Duration("duration", time.Since(startTime)),
