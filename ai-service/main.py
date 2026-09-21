@@ -86,11 +86,11 @@ async def analyze_snapshot(snapshot: ClusterSnapshot):
     try:
         snapshot_dict = snapshot.model_dump()
         raw_recs = analyze_workloads(snapshot_dict)
-        
+
         recommendations = []
         for r in raw_recs:
             recommendations.append(Recommendation(**r))
-            
+
         return recommendations
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reasoning error: {str(e)}")
