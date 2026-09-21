@@ -51,9 +51,9 @@ type AIServiceConfig struct {
 	URL string `yaml:"url"`
 }
 
-// ControlPlaneConfig holds the configuration for the Central Dashboard / Control Plane.
-type ControlPlaneConfig struct {
-	URL string `yaml:"url"`
+// APIConfig holds dashboard API configuration.
+type APIConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 type Config struct {
@@ -64,7 +64,7 @@ type Config struct {
 	Logging    LoggingConfig    `yaml:"logging"`
 	Storage    StorageConfig    `yaml:"storage"`
 	AIService  AIServiceConfig  `yaml:"ai_service"`
-	ControlPlane ControlPlaneConfig `yaml:"control_plane"`
+	API        APIConfig        `yaml:"api"`
 }
 
 // Load reads the configuration from the given path.
@@ -149,8 +149,8 @@ func applyEnvOverrides(config *Config) {
 	if val := os.Getenv("WATCHDOG_AI_SERVICE_URL"); val != "" {
 		config.AIService.URL = val
 	}
-	if val := os.Getenv("WATCHDOG_CONTROL_PLANE_URL"); val != "" {
-		config.ControlPlane.URL = val
+	if val := os.Getenv("WATCHDOG_API_ALLOWED_ORIGINS"); val != "" {
+		config.API.AllowedOrigins = strings.Split(val, ",")
 	}
 }
 

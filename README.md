@@ -11,6 +11,7 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 - **Telemetry**: Queries Prometheus for usage metrics.
 - **FinOps**: Integrates with OpenCost for cost allocation.
 - **Agent Loop**: Periodically collects data and reports to the control plane.
+- **Visibility API**: Exposes read-only cluster, workload, cost, recommendation, and freshness data for the dashboard.
 
 ## Quick Start
 
@@ -43,19 +44,56 @@ The core federated agent of the Watchdog FinOps Control Plane. Written in Go, it
 │   ├── k8s/            # Kubernetes client
 │   ├── telemetry/      # Prometheus client
 │   └── finops/         # OpenCost client
-├── .agents/            # AI Agent context and rules
+├── .agents/            # AI Agent context and rules (local only)
 └── README.md
 ```
 
 ## Configuration
 See [configs/config.yaml](configs/config.yaml) for the default configuration values. 
 
+## Dashboard API
+
+The agent serves the following read-only endpoints on its configured port:
+
+- `/health`
+- `/api/v1/status`
+- `/api/v1/overview`
+- `/api/v1/snapshots`
+- `/api/v1/workloads`
+- `/api/v1/recommendations`
+
+Browser origins must be explicitly listed under `api.allowed_origins`.
+
+## Start the Local Backend with psmux
+
+On Windows with PowerShell 7 and [psmux](https://github.com/psmux/psmux), start Prometheus and OpenCost port-forwards, the Python AI service, and the Go agent in one named session:
+
+```powershell
+.\scripts\start-backend.ps1
+```
+
+Useful options:
+
+```powershell
+# Rebuild an existing session
+.\scripts\start-backend.ps1 -Recreate
+
+# Start detached
+.\scripts\start-backend.ps1 -NoAttach
+
+# Stop all four backend windows
+.\scripts\start-backend.ps1 -Stop
+```
+
+The launcher uses the existing repository-level `.venv` and installs missing AI-service dependencies into it. It never creates or replaces the virtual environment. Use `-SkipDependencyInstall` when the environment already contains all required packages.
+
 ## Contributing
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our development process, branching strategy, and code conventions.
+Please see `CONTRIBUTING.md` (local only) for details on our development process, branching strategy, and code conventions.
 
 ## Related Repos
 - [watchdog-infra](https://github.com/mithulpranav24/watchdog-infra)
 - [watchdog-docs](https://github.com/mithulpranav24/watchdog-docs) (private)
+- `watchdog-dashboard` (operations dashboard)
 
 ## Team
 - mithulpranav24
