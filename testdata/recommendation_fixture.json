@@ -1,0 +1,28 @@
+[
+  {
+    "target": "default/yolo-detector",
+    "action": "rightsize_cpu",
+    "current_state": "{\"cpu_requests\": 0.5, \"replicas\": 2}",
+    "proposed_state": "{\"cpu_requests\": 0.35, \"replicas\": 2}",
+    "expected_savings": 2.10,
+    "confidence_score": 0.82,
+    "supporting_evidence": "CPU utilization averaged 24% over 24h; 350m covers peak with 20% headroom",
+    "rule_trace": ["forecast_ok", "utilization_low", "step_within_30pct", "above_min_cpu"],
+    "status": "Approved",
+    "rejection_reason": "",
+    "timestamp": "2026-10-03T10:01:00Z"
+  },
+  {
+    "target": "default/yolo-detector",
+    "action": "rightsize_memory",
+    "current_state": "{\"mem_requests\": 536870912}",
+    "proposed_state": "{\"mem_requests\": 314572800}",
+    "expected_savings": 0.85,
+    "confidence_score": 0.74,
+    "supporting_evidence": "Memory utilization averaged 39% over 24h; 300Mi covers peak usage",
+    "rule_trace": ["forecast_ok", "utilization_low"],
+    "status": "Approved",
+    "rejection_reason": "",
+    "timestamp": "2026-10-03T10:01:00Z"
+  }
+]

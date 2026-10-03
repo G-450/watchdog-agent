@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-10-03T10:00:00Z",
+  "cluster_id": "watchdog-agent-01",
+  "nodes": 2,
+  "total_cost": 18.88,
+  "namespaces": {
+    "default": {
+      "name": "default",
+      "namespace_cost": 12.44,
+      "workloads": {
+        "yolo-detector": {
+          "name": "yolo-detector",
+          "namespace": "default",
+          "type": "Deployment",
+          "replicas": 2,
+          "cpu_requests": 0.5,
+          "cpu_limits": 1.0,
+          "mem_requests": 536870912,
+          "mem_limits": 1073741824,
+          "cpu_usage": 0.12,
+          "mem_usage": 209715200,
+          "net_rx_usage": 1024,
+          "net_tx_usage": 512,
+          "total_cost": 12.44,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": ["yolo-detector-svc"]
+        }
+      }
+    },
+    "opencost": {
+      "name": "opencost",
+      "namespace_cost": 0.79,
+      "workloads": {
+        "opencost": {
+          "name": "opencost",
+          "namespace": "opencost",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0.1,
+          "cpu_limits": 0.5,
+          "mem_requests": 134217728,
+          "mem_limits": 268435456,
+          "cpu_usage": 0.02,
+          "mem_usage": 52428800,
+          "net_rx_usage": 256,
+          "net_tx_usage": 128,
+          "total_cost": 0.79,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": []
+        }
+      }
+    }
+  }
+}
