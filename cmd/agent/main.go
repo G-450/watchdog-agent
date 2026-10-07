@@ -16,6 +16,7 @@ import (
 	"watchdog-agent/internal/finops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/model"
+	"watchdog-agent/internal/gitops"
 	"watchdog-agent/internal/policy"
 	"watchdog-agent/internal/reasoning"
 	"watchdog-agent/internal/storage"
@@ -279,6 +280,19 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 		}
 		if err := store.SaveRecommendations(ctx, recs); err != nil {
 			slog.Error("Failed to persist recommendations", slog.Any("error", err))
+		}
+
+		var approved []model.Recommendation
+		for _, rec := range recs {
+			if rec.Status == "Approved" {
+				approved = append(approved, *rec)
+			}
+		}
+		if len(approved) > 0 {
+			snapshotID := clusterSnap.Timestamp.Format("20060102-150405")
+			if err := gitops.OpenPR(ctx, cfg, snapshotID, approved); err != nil {
+				slog.Warn("Failed to open GitOps PR", slog.Any("error", err))
+			}
 		}
 	}
 

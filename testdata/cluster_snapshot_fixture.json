@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-10-07T12:00:00Z",
+  "cluster_id": "watchdog-agent-01",
+  "nodes": 3,
+  "namespaces": {
+    "default": {
+      "name": "default",
+      "workloads": {
+        "yolo-detector": {
+          "name": "yolo-detector",
+          "namespace": "default",
+          "type": "Deployment",
+          "replicas": 3,
+          "cpu_requests": 1.5,
+          "cpu_limits": 3.0,
+          "mem_requests": 1024,
+          "mem_limits": 2048,
+          "cpu_usage": 0.5,
+          "mem_usage": 512,
+          "net_rx_usage": 0,
+          "net_tx_usage": 0,
+          "total_cost": 15.0,
+          "is_excluded": false,
+          "service_dependencies": []
+        }
+      },
+      "namespace_cost": 15.0
+    }
+  },
+  "total_cost": 15.0
+}

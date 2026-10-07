@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "target": "default/yolo-detector",
+    "current_state": "{\"cpu_requests\": 1.5, \"replicas\": 3}",
+    "proposed_state": "{\"cpu_requests\": 0.35, \"replicas\": 2}",
+    "expected_savings": 50.0,
+    "confidence_score": 0.95,
+    "supporting_evidence": "Low CPU usage",
+    "rule_trace": [],
+    "status": "Approved",
+    "timestamp": "2026-10-07T12:00:00Z"
+  }
+]
