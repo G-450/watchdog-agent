@@ -12,11 +12,11 @@ import (
 func TestOpenPR(t *testing.T) {
 	// Table-driven tests
 	tests := []struct {
-		name         string
-		fixture      string
-		snapshotID   string
-		expectErr    bool
-		mockGitOps   bool
+		name       string
+		fixture    string
+		snapshotID string
+		expectErr  bool
+		mockGitOps bool
 	}{
 		{
 			name:       "valid approved recommendations",
@@ -40,7 +40,7 @@ func TestOpenPR(t *testing.T) {
 			}
 
 			// Ideally we would mock the Git operations and HTTP client for GitHub API.
-			// Since we want to verify logic without real cluster/github, 
+			// Since we want to verify logic without real cluster/github,
 			// this test invokes the actual OpenPR. But it will fail because no real token.
 			// But the structure matches what's asked.
 			cfg := &config.Config{}
@@ -55,11 +55,11 @@ func TestOpenPR(t *testing.T) {
 func TestPatchDeploymentYaml(t *testing.T) {
 	// Table-driven tests for patchDeploymentYaml
 	tests := []struct {
-		name          string
-		initialYaml   string
-		state         ProposedState
-		expectedYaml  string
-		expectErr     bool
+		name         string
+		initialYaml  string
+		state        ProposedState
+		expectedYaml string
+		expectErr    bool
 	}{
 		{
 			name: "patch replicas and cpu",
@@ -80,7 +80,7 @@ spec:
 `,
 			state: ProposedState{
 				CPURequests: 0.35,
-				Replicas: func() *int32 { r := int32(2); return &r }(),
+				Replicas:    func() *int32 { r := int32(2); return &r }(),
 			},
 			expectedYaml: `apiVersion: apps/v1
 kind: Deployment
