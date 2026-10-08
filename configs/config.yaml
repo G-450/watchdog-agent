@@ -48,3 +48,15 @@ policy:
 api:
   allowed_origins:
     - "http://localhost:3000"
+
+gitops:
+  enabled: false                 # open PRs on the infra repo for approved recommendations
+  repo: "mithulpranav24/watchdog-infra"
+  base_branch: "main"
+  manifest_root: "workloads"     # manifests live at <manifest_root>/<namespace>/<name>/
+  branch_prefix: "watchdog/"     # one branch and PR per workload: <prefix><namespace>-<name>
+  api_url: "https://api.github.com"
+  timeout: "30s"                 # per GitHub API request
+  operation_timeout: "2m"        # all work for one workload, including git clone and push
+  author_name: "Watchdog Agent"
+  author_email: "watchdog-agent@users.noreply.github.com"

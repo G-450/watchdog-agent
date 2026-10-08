@@ -98,13 +98,15 @@ Linux/macOS users: run steps 3 and 4 manually in separate terminals.
 | `WATCHDOG_PROMETHEUS_URL` | from config.yaml | overrides prometheus.url |
 | `WATCHDOG_OPENCOST_URL` | from config.yaml | overrides opencost.url |
 | `WATCHDOG_AI_SERVICE_URL` | from config.yaml | overrides ai_service.url |
-| `GITHUB_TOKEN` | — | required for Phase 4 GitOps PR generation (PAT with `repo` scope) |
+| `WATCHDOG_GITOPS_ENABLED` | `false` | overrides gitops.enabled |
+| `WATCHDOG_GITOPS_REPO` | `mithulpranav24/watchdog-infra` | overrides gitops.repo |
+| `GITHUB_TOKEN` | — | required when GitOps is enabled: fine-grained PAT for the target repo with Contents and Pull requests read/write |
 
 The agent reads these from the process environment; nothing loads a `.env` file. Set them in your shell (`$env:GITHUB_TOKEN = "..."` in PowerShell, `export GITHUB_TOKEN=...` in bash). `.env.example` lists them for reference.
 
 ## Phase 4 — working without cluster access
 
-The GitOps PR generator (`internal/gitops/`) takes approved `Recommendation`s and opens a PR against `watchdog-infra`, where workload manifests live under `workloads/<namespace>/<name>/`. You can develop and unit-test this entirely offline:
+The GitOps PR generator (`internal/gitops/`) takes approved `Recommendation`s and opens a PR against `watchdog-infra`, where workload manifests live under `workloads/<namespace>/<name>/`. It keeps one branch and PR per workload (`watchdog/<namespace>-<name>`), changes only the lines whose values change, and does nothing while an open PR already proposes the same change. It is off unless `gitops.enabled` is `true` and `GITHUB_TOKEN` is set. You can develop and unit-test this entirely offline:
 
 1. Inputs are in `testdata/`: a real snapshot, the real recommendations produced for it, and a copy of the `workloads/` tree. `testdata/README.md` explains what each file covers.
 2. Unit tests must not touch the network. Seed a local repository from `testdata/manifests/` in `t.TempDir()` and serve the GitHub API from `httptest.Server`.

@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -70,6 +72,21 @@ type APIConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
+// GitOpsConfig controls the GitOps PR generator.
+type GitOpsConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Repo         string `yaml:"repo"` // "owner/name"
+	BaseBranch   string `yaml:"base_branch"`
+	ManifestRoot string `yaml:"manifest_root"`
+	BranchPrefix string `yaml:"branch_prefix"`
+	APIURL       string `yaml:"api_url"`
+	Timeout      string `yaml:"timeout"` // per GitHub API request
+	// OperationTimeout bounds all work for one workload, including git clone and push.
+	OperationTimeout string `yaml:"operation_timeout"`
+	AuthorName       string `yaml:"author_name"`
+	AuthorEmail      string `yaml:"author_email"`
+}
+
 type Config struct {
 	Agent      AgentConfig      `yaml:"agent"`
 	Prometheus PrometheusConfig `yaml:"prometheus"`
@@ -80,6 +97,7 @@ type Config struct {
 	AIService  AIServiceConfig  `yaml:"ai_service"`
 	Policy     PolicyConfig     `yaml:"policy"`
 	API        APIConfig        `yaml:"api"`
+	GitOps     GitOpsConfig     `yaml:"gitops"`
 }
 
 // Load reads the configuration from the given path.
@@ -169,6 +187,16 @@ func applyEnvOverrides(config *Config) {
 	if val := os.Getenv("WATCHDOG_API_ALLOWED_ORIGINS"); val != "" {
 		config.API.AllowedOrigins = strings.Split(val, ",")
 	}
+	if val := os.Getenv("WATCHDOG_GITOPS_ENABLED"); val != "" {
+		if enabled, err := strconv.ParseBool(val); err == nil {
+			config.GitOps.Enabled = enabled
+		} else {
+			slog.Warn("Ignoring WATCHDOG_GITOPS_ENABLED: not a boolean", slog.String("value", val))
+		}
+	}
+	if val := os.Getenv("WATCHDOG_GITOPS_REPO"); val != "" {
+		config.GitOps.Repo = val
+	}
 }
 
 // applyDefaults fills optional settings that were omitted from every config source.
@@ -197,6 +225,30 @@ func applyDefaults(config *Config) {
 	if config.Policy.ExcludedNamespaces == nil {
 		config.Policy.ExcludedNamespaces = []string{"kube-system", "monitoring", "watchdog"}
 	}
+	if config.GitOps.BaseBranch == "" {
+		config.GitOps.BaseBranch = "main"
+	}
+	if config.GitOps.ManifestRoot == "" {
+		config.GitOps.ManifestRoot = "workloads"
+	}
+	if config.GitOps.BranchPrefix == "" {
+		config.GitOps.BranchPrefix = "watchdog/"
+	}
+	if config.GitOps.APIURL == "" {
+		config.GitOps.APIURL = "https://api.github.com"
+	}
+	if config.GitOps.Timeout == "" {
+		config.GitOps.Timeout = "30s"
+	}
+	if config.GitOps.OperationTimeout == "" {
+		config.GitOps.OperationTimeout = "2m"
+	}
+	if config.GitOps.AuthorName == "" {
+		config.GitOps.AuthorName = "Watchdog Agent"
+	}
+	if config.GitOps.AuthorEmail == "" {
+		config.GitOps.AuthorEmail = "watchdog-agent@users.noreply.github.com"
+	}
 }
 
 // validate ensures required fields are set.
@@ -209,6 +261,18 @@ func validate(config *Config) error {
 	}
 	if config.OpenCost.URL == "" {
 		return fmt.Errorf("opencost.url is required")
+	}
+	if config.GitOps.Enabled {
+		owner, name, ok := strings.Cut(config.GitOps.Repo, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("gitops.repo must be in owner/name form, got %q", config.GitOps.Repo)
+		}
+		if _, err := time.ParseDuration(config.GitOps.Timeout); err != nil {
+			return fmt.Errorf("gitops.timeout: %w", err)
+		}
+		if _, err := time.ParseDuration(config.GitOps.OperationTimeout); err != nil {
+			return fmt.Errorf("gitops.operation_timeout: %w", err)
+		}
 	}
 	return nil
 }

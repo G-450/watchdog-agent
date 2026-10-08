@@ -15,6 +15,7 @@ import (
 	"watchdog-agent/internal/api"
 	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/finops"
+	"watchdog-agent/internal/gitops"
 	"watchdog-agent/internal/k8s"
 	"watchdog-agent/internal/model"
 	"watchdog-agent/internal/policy"
@@ -67,6 +68,7 @@ func main() {
 
 	aiClient := reasoning.NewClient(cfg)
 	policyValidator := policy.NewFromConfig(cfg.Policy)
+	prGenerator := newPRGenerator(cfg)
 
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -103,7 +105,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Run first cycle immediately
-	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator)
+	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator)
 
 	// Loop
 	for {
@@ -115,12 +117,12 @@ func main() {
 			cancelShutdown()
 			return
 		case <-ticker.C:
-			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator)
+			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator)
 		}
 	}
 }
 
-func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store, aiClient *reasoning.Client, validator policy.Validator) {
+func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store, aiClient *reasoning.Client, validator policy.Validator, prGenerator *gitops.Generator) {
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now().UTC()
 
@@ -220,6 +222,17 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 			slog.Error("Failed to persist recommendations", slog.Any("error", err))
 		}
 		slog.Info("Analysis complete", slog.Int("recommendations", len(recs)), slog.Int("approved", approved))
+		if prGenerator != nil {
+			approvedRecs := make([]model.Recommendation, 0, approved)
+			for _, rec := range recs {
+				if rec.Status == "Approved" {
+					approvedRecs = append(approvedRecs, *rec)
+				}
+			}
+			if err := prGenerator.Apply(ctx, approvedRecs); err != nil {
+				slog.Warn("GitOps PR generation incomplete", slog.Any("error", err))
+			}
+		}
 	}
 
 	slog.Info("--- Completed Reconciliation Cycle ---",
@@ -227,6 +240,27 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 		slog.Int("namespaces_profiled", len(clusterSnap.Namespaces)),
 		slog.Float64("monthly_cluster_cost", clusterSnap.TotalCost),
 	)
+}
+
+// newPRGenerator returns the GitOps PR generator, or nil when GitOps is disabled or cannot start.
+// A missing token disables GitOps instead of stopping the agent.
+func newPRGenerator(cfg *config.Config) *gitops.Generator {
+	if !cfg.GitOps.Enabled {
+		slog.Info("GitOps PR generation disabled")
+		return nil
+	}
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		slog.Error("gitops.enabled is true but GITHUB_TOKEN is not set; GitOps PR generation disabled")
+		return nil
+	}
+	gen, err := gitops.New(cfg.GitOps, cfg.Policy.ExcludedNamespaces, token)
+	if err != nil {
+		slog.Error("Failed to initialize GitOps PR generator; GitOps PR generation disabled", slog.Any("error", err))
+		return nil
+	}
+	slog.Info("GitOps PR generation enabled", slog.String("repo", cfg.GitOps.Repo))
+	return gen
 }
 
 // collectWorkload builds a deployment's snapshot from its spec, telemetry, and cost allocation.
