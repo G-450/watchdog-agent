@@ -1,28 +1,45 @@
 [
   {
     "target": "default/yolo-detector",
-    "action": "rightsize_cpu",
-    "current_state": "{\"cpu_requests\": 0.5, \"replicas\": 2}",
-    "proposed_state": "{\"cpu_requests\": 0.35, \"replicas\": 2}",
-    "expected_savings": 2.10,
-    "confidence_score": 0.82,
-    "supporting_evidence": "CPU utilization averaged 24% over 24h; 350m covers peak with 20% headroom",
-    "rule_trace": ["forecast_ok", "utilization_low", "step_within_30pct", "above_min_cpu"],
+    "action": "RIGHTSIZE_CPU_DOWN",
+    "current_state": "{\"cpu_requests\": 0.5, \"replicas\": 1, \"mem_requests\": 314572800.0}",
+    "proposed_state": "{\"cpu_requests\": 0.35, \"replicas\": 1, \"mem_requests\": 314572800.0}",
+    "expected_savings": 3.6,
+    "confidence_score": 0.74,
+    "supporting_evidence": "Forecasted 24h peak CPU is 0.000 cores vs requested 0.500 cores (0.1% utilization). Proposing step-down to 0.350 cores retaining 30% safety headroom.",
+    "rule_trace": [
+      "UtilizationProfiled",
+      "OverProvisionedCPURule",
+      "SafetyHeadroomApplied",
+      "ConfidenceScored:0.74",
+      "PolicyApproved:NamespaceAllowed",
+      "LocalPolicyEvaluated:Approved",
+      "OPAPolicyEvaluated:Approved",
+      "KyvernoPolicyEvaluated:Approved"
+    ],
     "status": "Approved",
-    "rejection_reason": "",
-    "timestamp": "2026-10-03T10:01:00Z"
+    "timestamp": "2026-10-08T04:20:24.34482Z"
   },
   {
-    "target": "default/yolo-detector",
-    "action": "rightsize_memory",
-    "current_state": "{\"mem_requests\": 536870912}",
-    "proposed_state": "{\"mem_requests\": 314572800}",
-    "expected_savings": 0.85,
-    "confidence_score": 0.74,
-    "supporting_evidence": "Memory utilization averaged 39% over 24h; 300Mi covers peak usage",
-    "rule_trace": ["forecast_ok", "utilization_low"],
-    "status": "Approved",
-    "rejection_reason": "",
-    "timestamp": "2026-10-03T10:01:00Z"
+    "target": "opencost/opencost",
+    "action": "SCALE_UP_CPU_SAFETY",
+    "current_state": "{\"cpu_requests\": 0.02, \"replicas\": 1, \"mem_requests\": 115343360.0}",
+    "proposed_state": "{\"cpu_requests\": 0.043, \"replicas\": 1, \"mem_requests\": 115343360.0}",
+    "expected_savings": 0,
+    "confidence_score": 0.72,
+    "supporting_evidence": "Peak CPU forecast (0.034 cores) reaches 170.0% of requested capacity (0.020 cores). Scaling up to prevent throttling and SLA breach.",
+    "rule_trace": [
+      "UtilizationProfiled",
+      "UnderProvisionedCPURule",
+      "ThrottlingPreventionSafeguard",
+      "ConfidenceScored:0.72",
+      "PolicyApproved:NamespaceAllowed",
+      "LocalPolicyEvaluated:Approved",
+      "OPAPolicyEvaluated:Approved",
+      "KyvernoPolicyEvaluated:Rejected"
+    ],
+    "status": "Rejected",
+    "rejection_reason": "Kyverno policy violation: proposed CPU request is below cluster minimum limit (50m)",
+    "timestamp": "2026-10-08T04:20:24.351824Z"
   }
 ]
