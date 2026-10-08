@@ -100,11 +100,13 @@ Linux/macOS users: run steps 3 and 4 manually in separate terminals.
 | `WATCHDOG_AI_SERVICE_URL` | from config.yaml | overrides ai_service.url |
 | `GITHUB_TOKEN` | — | required for Phase 4 GitOps PR generation (PAT with `repo` scope) |
 
+The agent reads these from the process environment; nothing loads a `.env` file. Set them in your shell (`$env:GITHUB_TOKEN = "..."` in PowerShell, `export GITHUB_TOKEN=...` in bash). `.env.example` lists them for reference.
+
 ## Phase 4 — working without cluster access
 
-The GitOps PR generator (`internal/gitops/`) takes validated `Recommendation` structs and opens a PR against `infra-manifests`. You can develop and unit-test this entirely offline:
+The GitOps PR generator (`internal/gitops/`) takes approved `Recommendation`s and opens a PR against `watchdog-infra`, where workload manifests live under `workloads/<namespace>/<name>/`. You can develop and unit-test this entirely offline:
 
-1. Use the static fixture at `testdata/cluster_snapshot_fixture.json` as input.
-2. Write unit tests in `internal/gitops/pr_generator_test.go` against static `Recommendation` structs.
-3. Set `GITHUB_TOKEN` to a PAT with `repo` scope to test actual PR creation against a fork.
+1. Inputs are in `testdata/`: a real snapshot, the real recommendations produced for it, and a copy of the `workloads/` tree. `testdata/README.md` explains what each file covers.
+2. Unit tests must not touch the network. Seed a local repository from `testdata/manifests/` in `t.TempDir()` and serve the GitHub API from `httptest.Server`.
+3. Never run a test with a real `GITHUB_TOKEN` against `watchdog-infra`. For a manual end-to-end check, use a fork.
 4. Integration testing against the real cluster is done by the cluster owner (mithulpranav24).

@@ -1,0 +1,35 @@
+# SYNTHETIC: not deployed anywhere. Modelled on yolo-detector with a logging
+# sidecar added, to cover pods with more than one container. The agent's
+# cpu_requests for this workload would be the pod total (500m + 100m = 0.6).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sidecar-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sidecar-demo
+  template:
+    metadata:
+      labels:
+        app: sidecar-demo
+    spec:
+      containers:
+      - name: log-shipper
+        image: fluent/fluent-bit:3.1
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+      - name: app
+        image: mithulpranav24/yolo-v8n:latest
+        resources:
+          requests:
+            memory: "300Mi"
+            cpu: "500m"
+          limits:
+            memory: "1500Mi"
+            cpu: "1"
+        ports:
+        - containerPort: 5000
