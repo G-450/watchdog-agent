@@ -5,8 +5,54 @@ import (
 	"fmt"
 	"strings"
 
+	"watchdog-agent/internal/config"
 	"watchdog-agent/internal/model"
 )
+
+// stepDownTolerance absorbs rounding in proposals that sit exactly on the step-down limit.
+const stepDownTolerance = 1e-6
+
+// NewFromConfig builds the composite validator the agent runs, using configured guardrails.
+func NewFromConfig(cfg config.PolicyConfig) *CompositeValidator {
+	local := NewLocalValidator()
+	local.MinReplicas = cfg.MinReplicas
+	local.MaxStepDownPercent = cfg.MaxStepDownPercent
+	local.ExcludedNamespaces = cfg.ExcludedNamespaces
+
+	opa := NewOPAPolicyValidator("")
+	opa.MinConfidenceScore = cfg.MinConfidence
+
+	kyverno := NewKyvernoPolicyValidator()
+	kyverno.MinCPURequest = cfg.MinCPURequest
+
+	return NewCompositeValidator(local, opa, kyverno)
+}
+
+// replicasBelow reports whether a recommendation leaves fewer than floor replicas by removing some.
+// Changes that keep the replica count (such as CPU rightsizing) never violate a replica floor.
+// When the current count is unknown, any proposed count below the floor is treated as a violation.
+func replicasBelow(rec *model.Recommendation, floor int) (int, bool) {
+	var currentState, proposedState map[string]interface{}
+	if err := json.Unmarshal([]byte(rec.ProposedState), &proposedState); err != nil {
+		return 0, false
+	}
+	proposed, ok := proposedState["replicas"].(float64)
+	if !ok || int(proposed) >= floor {
+		return int(proposed), false
+	}
+	if err := json.Unmarshal([]byte(rec.CurrentState), &currentState); err == nil {
+		if current, ok := currentState["replicas"].(float64); ok && proposed >= current {
+			return int(proposed), false
+		}
+	}
+	return int(proposed), true
+}
+
+// targetNamespace returns the namespace part of a "namespace/name" target.
+func targetNamespace(target string) string {
+	namespace, _, _ := strings.Cut(strings.Trim(target, "/"), "/")
+	return namespace
+}
 
 // Validator defines the interface for recommendation validation against policies.
 type Validator interface {
@@ -32,8 +78,9 @@ func NewLocalValidator() *LocalValidator {
 // Validate checks if the recommendation adheres to organizational policies.
 func (v *LocalValidator) Validate(rec *model.Recommendation) error {
 	// 1. Excluded Namespaces
+	namespace := targetNamespace(rec.Target)
 	for _, ns := range v.ExcludedNamespaces {
-		if strings.Contains(rec.Target, "/namespace/"+ns+"/") || strings.Contains(rec.Target, ns) {
+		if namespace == ns {
 			return v.reject(rec, fmt.Sprintf("namespace %s is excluded from automated changes", ns))
 		}
 	}
@@ -42,20 +89,19 @@ func (v *LocalValidator) Validate(rec *model.Recommendation) error {
 	errC := json.Unmarshal([]byte(rec.CurrentState), &currentState)
 	errP := json.Unmarshal([]byte(rec.ProposedState), &proposedState)
 
+	// Min Replicas check
+	if proposed, below := replicasBelow(rec, v.MinReplicas); below {
+		return v.reject(rec, fmt.Sprintf("proposed replicas (%d) is below minimum allowed (%d)", proposed, v.MinReplicas))
+	}
+
 	if errC == nil && errP == nil {
-		// Min Replicas check
-		if proposedReps, ok := proposedState["replicas"].(float64); ok {
-			if int(proposedReps) < v.MinReplicas {
-				return v.reject(rec, fmt.Sprintf("proposed replicas (%d) is below minimum allowed (%d)", int(proposedReps), v.MinReplicas))
-			}
-		}
 
 		// Max Step-Down Percent check for CPU requests
 		if currentCPU, okC := currentState["cpu_requests"].(float64); okC {
 			if proposedCPU, okP := proposedState["cpu_requests"].(float64); okP {
 				if proposedCPU < currentCPU {
 					stepDown := (currentCPU - proposedCPU) / currentCPU
-					if stepDown > v.MaxStepDownPercent {
+					if stepDown > v.MaxStepDownPercent+stepDownTolerance {
 						return v.reject(rec, fmt.Sprintf("proposed CPU step-down (%.1f%%) exceeds maximum allowed (%.1f%%)", stepDown*100, v.MaxStepDownPercent*100))
 					}
 				}
@@ -70,8 +116,14 @@ func (v *LocalValidator) Validate(rec *model.Recommendation) error {
 }
 
 func (v *LocalValidator) reject(rec *model.Recommendation, reason string) error {
+	return reject(rec, "LocalPolicyEvaluated:Rejected", reason)
+}
+
+// reject marks a recommendation as rejected and records which policy stopped it.
+func reject(rec *model.Recommendation, trace, reason string) error {
 	rec.Status = "Rejected"
 	rec.RejectionReason = reason
+	rec.RuleTrace = append(rec.RuleTrace, trace)
 	return fmt.Errorf("policy violation: %s", reason)
 }
 
@@ -124,20 +176,13 @@ func (o *OPAPolicyValidator) Validate(rec *model.Recommendation) error {
 
 	// Confidence score admission threshold
 	if rec.ConfidenceScore < o.MinConfidenceScore {
-		rec.Status = "Rejected"
-		rec.RejectionReason = fmt.Sprintf("OPA policy violation: confidence score %.2f is below admission threshold %.2f", rec.ConfidenceScore, o.MinConfidenceScore)
-		return fmt.Errorf("%s", rec.RejectionReason)
+		return reject(rec, "OPAPolicyEvaluated:Rejected", fmt.Sprintf("OPA policy violation: confidence score %.2f is below admission threshold %.2f", rec.ConfidenceScore, o.MinConfidenceScore))
 	}
 
 	// Production safeguarding Rego rule
 	if isProductionWorkload(rec.Target) {
-		var proposedState map[string]interface{}
-		if err := json.Unmarshal([]byte(rec.ProposedState), &proposedState); err == nil {
-			if reps, ok := proposedState["replicas"].(float64); ok && int(reps) < 3 {
-				rec.Status = "Rejected"
-				rec.RejectionReason = "OPA policy violation (rego: prod_high_availability): production workloads must maintain at least 3 replicas"
-				return fmt.Errorf("%s", rec.RejectionReason)
-			}
+		if _, below := replicasBelow(rec, 3); below {
+			return reject(rec, "OPAPolicyEvaluated:Rejected", "OPA policy violation (rego: prod_high_availability): production workloads must maintain at least 3 replicas")
 		}
 	}
 
@@ -149,6 +194,7 @@ func (o *OPAPolicyValidator) Validate(rec *model.Recommendation) error {
 type KyvernoPolicyValidator struct {
 	PolicyName         string
 	EnforceLimitRanges bool
+	MinCPURequest      float64 // cores
 }
 
 // NewKyvernoPolicyValidator creates a new Kyverno policy stub.
@@ -156,6 +202,7 @@ func NewKyvernoPolicyValidator() *KyvernoPolicyValidator {
 	return &KyvernoPolicyValidator{
 		PolicyName:         "watchdog-resource-quotas",
 		EnforceLimitRanges: true,
+		MinCPURequest:      0.05,
 	}
 }
 
@@ -164,10 +211,8 @@ func (k *KyvernoPolicyValidator) Validate(rec *model.Recommendation) error {
 	var proposedState map[string]interface{}
 	if err := json.Unmarshal([]byte(rec.ProposedState), &proposedState); err == nil {
 		if cpu, ok := proposedState["cpu_requests"].(float64); ok {
-			if cpu < 0.05 {
-				rec.Status = "Rejected"
-				rec.RejectionReason = "Kyverno policy violation: proposed CPU request is below cluster minimum limit (50m)"
-				return fmt.Errorf("%s", rec.RejectionReason)
+			if cpu < k.MinCPURequest {
+				return reject(rec, "KyvernoPolicyEvaluated:Rejected", fmt.Sprintf("Kyverno policy violation: proposed CPU request is below cluster minimum limit (%dm)", int(k.MinCPURequest*1000)))
 			}
 		}
 	}

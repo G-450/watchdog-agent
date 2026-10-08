@@ -8,7 +8,7 @@ from reasoner import analyze_workloads
 from forecaster import generate_forecast
 
 def test_generate_forecast_compatibility():
-    workload = {"CPUUsage": 1.0, "MemUsage": 1024.0}
+    workload = {"cpu_usage": 1.0, "mem_usage": 1024.0}
     forecast = generate_forecast(workload)
     assert forecast["expected_peak_cpu"] > 1.0
     assert forecast["expected_peak_mem"] > 1024.0
@@ -18,13 +18,13 @@ def test_reasoner_overprovisioned_rightsizing():
     snapshot = {
         "namespaces": {
             "default": {
-                "Workloads": {
+                "workloads": {
                     "overprovisioned-app": {
-                        "CPUUsage": 0.1,
-                        "CPURequests": 1.0,
-                        "MemUsage": 200.0,
-                        "MemRequests": 1024.0,
-                        "Replicas": 3
+                        "cpu_usage": 0.1,
+                        "cpu_requests": 1.0,
+                        "mem_usage": 200.0,
+                        "mem_requests": 1024.0,
+                        "replicas": 3
                     }
                 }
             }
@@ -47,13 +47,13 @@ def test_reasoner_underprovisioned_scale_up():
     snapshot = {
         "namespaces": {
             "production": {
-                "Workloads": {
+                "workloads": {
                     "high-traffic-service": {
-                        "CPUUsage": 0.95,
-                        "CPURequests": 1.0,
-                        "MemUsage": 900.0,
-                        "MemRequests": 1024.0,
-                        "Replicas": 2
+                        "cpu_usage": 1.9,
+                        "cpu_requests": 1.0,
+                        "mem_usage": 900.0,
+                        "mem_requests": 1024.0,
+                        "replicas": 2
                     }
                 }
             }
@@ -73,11 +73,11 @@ def test_reasoner_replica_rightsizing():
     snapshot = {
         "namespaces": {
             "default": {
-                "Workloads": {
+                "workloads": {
                     "over-replicated-api": {
-                        "CPUUsage": 0.05,
-                        "CPURequests": 1.0,
-                        "Replicas": 5
+                        "cpu_usage": 0.05,
+                        "cpu_requests": 1.0,
+                        "replicas": 5
                     }
                 }
             }
@@ -93,11 +93,11 @@ def test_reasoner_namespace_policy_rejection():
     snapshot = {
         "namespaces": {
             "kube-system": {
-                "Workloads": {
+                "workloads": {
                     "coredns": {
-                        "CPUUsage": 0.01,
-                        "CPURequests": 1.0,
-                        "Replicas": 2
+                        "cpu_usage": 0.01,
+                        "cpu_requests": 1.0,
+                        "replicas": 2
                     }
                 }
             }
