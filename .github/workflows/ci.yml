@@ -30,7 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-        steps:
+      packages: write
+    steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
