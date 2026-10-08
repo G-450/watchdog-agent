@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/watchdog-agent ./cmd/agent
 
-FROM alpine:3.19
+FROM alpine:3.22
 
 RUN apk add --no-cache git ca-certificates
 
