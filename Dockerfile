@@ -1,0 +1,20 @@
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/watchdog-agent ./cmd/agent
+
+FROM alpine:3.19
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+COPY --from=builder /app/watchdog-agent /app/watchdog-agent
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+ENTRYPOINT ["/app/watchdog-agent"]
