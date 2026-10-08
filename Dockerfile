@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/watchdog-agent ./cmd/agent
 
 FROM alpine:3.19
 
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 COPY --from=builder /app/watchdog-agent /app/watchdog-agent
