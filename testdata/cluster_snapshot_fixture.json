@@ -1,56 +1,273 @@
 {
-  "timestamp": "2026-10-03T10:00:00Z",
+  "timestamp": "2026-10-08T04:20:22.8306374Z",
   "cluster_id": "watchdog-agent-01",
   "nodes": 2,
-  "total_cost": 18.88,
   "namespaces": {
+    "argocd": {
+      "name": "argocd",
+      "workloads": {
+        "argocd-applicationset-controller": {
+          "name": "argocd-applicationset-controller",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.0015827376440764737,
+          "mem_usage": 24371200,
+          "net_rx_usage": 630.8345041306503,
+          "net_tx_usage": 22.563856964261177,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-applicationset-controller"
+          ]
+        },
+        "argocd-dex-server": {
+          "name": "argocd-dex-server",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.00021716546912423188,
+          "mem_usage": 110874624,
+          "net_rx_usage": 14.441901647157431,
+          "net_tx_usage": 10.304491986079897,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-dex-server"
+          ]
+        },
+        "argocd-notifications-controller": {
+          "name": "argocd-notifications-controller",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.000567070852582473,
+          "mem_usage": 25260032,
+          "net_rx_usage": 701.8001507843576,
+          "net_tx_usage": 30.752743125685814,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-notifications-controller-metrics"
+          ]
+        },
+        "argocd-redis": {
+          "name": "argocd-redis",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.005344405552553514,
+          "mem_usage": 30605312,
+          "net_rx_usage": 279.59832168750876,
+          "net_tx_usage": 2475.6217720812224,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-redis"
+          ]
+        },
+        "argocd-repo-server": {
+          "name": "argocd-repo-server",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.0017748786222480093,
+          "mem_usage": 118812672,
+          "net_rx_usage": 2714.752070375589,
+          "net_tx_usage": 19205.613400074075,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-repo-server"
+          ]
+        },
+        "argocd-server": {
+          "name": "argocd-server",
+          "namespace": "argocd",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.0011146576610926396,
+          "mem_usage": 23437312,
+          "net_rx_usage": 777.0305850596997,
+          "net_tx_usage": 135.0212780896137,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "argocd-server",
+            "argocd-server-metrics"
+          ]
+        }
+      },
+      "namespace_cost": 0
+    },
     "default": {
       "name": "default",
-      "namespace_cost": 12.44,
       "workloads": {
+        "flask-calc": {
+          "name": "flask-calc",
+          "namespace": "default",
+          "type": "Deployment",
+          "replicas": 2,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.0024763519577118897,
+          "mem_usage": 121327616,
+          "net_rx_usage": 0,
+          "net_tx_usage": 0,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "calc-service"
+          ]
+        },
         "yolo-detector": {
           "name": "yolo-detector",
           "namespace": "default",
           "type": "Deployment",
-          "replicas": 2,
+          "replicas": 1,
           "cpu_requests": 0.5,
-          "cpu_limits": 1.0,
-          "mem_requests": 536870912,
-          "mem_limits": 1073741824,
-          "cpu_usage": 0.12,
-          "mem_usage": 209715200,
-          "net_rx_usage": 1024,
-          "net_tx_usage": 512,
-          "total_cost": 12.44,
+          "cpu_limits": 1,
+          "mem_requests": 314572800,
+          "mem_limits": 1572864000,
+          "cpu_usage": 0.00024388900624679693,
+          "mem_usage": 328486912,
+          "net_rx_usage": 0,
+          "net_tx_usage": 0,
+          "total_cost": 12.439200000000001,
           "is_excluded": false,
           "exclude_reason": "",
-          "service_dependencies": ["yolo-detector-svc"]
+          "service_dependencies": [
+            "yolo-service"
+          ]
         }
-      }
+      },
+      "namespace_cost": 12.439200000000001
+    },
+    "monitoring": {
+      "name": "monitoring",
+      "workloads": {
+        "prometheus-stack-grafana": {
+          "name": "prometheus-stack-grafana",
+          "namespace": "monitoring",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.005168913794156364,
+          "mem_usage": 387215360,
+          "net_rx_usage": 11610.500245966989,
+          "net_tx_usage": 989.5879628844294,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "prometheus-stack-grafana"
+          ]
+        },
+        "prometheus-stack-kube-prom-operator": {
+          "name": "prometheus-stack-kube-prom-operator",
+          "namespace": "monitoring",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.00689852832630791,
+          "mem_usage": 69865472,
+          "net_rx_usage": 331.0389699335662,
+          "net_tx_usage": 247.82891582768303,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "prometheus-stack-kube-prom-operator"
+          ]
+        },
+        "prometheus-stack-kube-state-metrics": {
+          "name": "prometheus-stack-kube-state-metrics",
+          "namespace": "monitoring",
+          "type": "Deployment",
+          "replicas": 1,
+          "cpu_requests": 0,
+          "cpu_limits": 0,
+          "mem_requests": 0,
+          "mem_limits": 0,
+          "cpu_usage": 0.0011323789710180794,
+          "mem_usage": 49152000,
+          "net_rx_usage": 597.2516376890114,
+          "net_tx_usage": 14678.67954337934,
+          "total_cost": 0,
+          "is_excluded": false,
+          "exclude_reason": "",
+          "service_dependencies": [
+            "prometheus-stack-kube-state-metrics"
+          ]
+        }
+      },
+      "namespace_cost": 0.6132
     },
     "opencost": {
       "name": "opencost",
-      "namespace_cost": 0.79,
       "workloads": {
         "opencost": {
           "name": "opencost",
           "namespace": "opencost",
           "type": "Deployment",
           "replicas": 1,
-          "cpu_requests": 0.1,
-          "cpu_limits": 0.5,
-          "mem_requests": 134217728,
-          "mem_limits": 268435456,
-          "cpu_usage": 0.02,
-          "mem_usage": 52428800,
-          "net_rx_usage": 256,
-          "net_tx_usage": 128,
-          "total_cost": 0.79,
+          "cpu_requests": 0.02,
+          "cpu_limits": 1.998,
+          "mem_requests": 115343360,
+          "mem_limits": 2147483648,
+          "cpu_usage": 0.025220634267154273,
+          "mem_usage": 102739968,
+          "net_rx_usage": 10920.354919781408,
+          "net_tx_usage": 9932.248896811712,
+          "total_cost": 0.7884,
           "is_excluded": false,
           "exclude_reason": "",
-          "service_dependencies": []
+          "service_dependencies": [
+            "opencost"
+          ]
         }
-      }
+      },
+      "namespace_cost": 0.7884
     }
-  }
+  },
+  "total_cost": 18.9216
 }
