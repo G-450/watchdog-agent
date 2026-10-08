@@ -21,12 +21,17 @@ type AgentConfig struct {
 type PrometheusConfig struct {
 	URL     string `yaml:"url"`
 	Timeout string `yaml:"timeout"`
+	// HistoryWindow and HistoryStep control the usage series sent to the forecaster.
+	HistoryWindow string `yaml:"history_window"`
+	HistoryStep   string `yaml:"history_step"`
 }
 
 // OpenCostConfig holds the configuration for OpenCost connectivity.
 type OpenCostConfig struct {
 	URL     string `yaml:"url"`
 	Timeout string `yaml:"timeout"`
+	// Window is the allocation window used to derive monthly run-rate costs.
+	Window string `yaml:"window"`
 }
 
 // KubernetesConfig holds the configuration for Kubernetes discovery.
@@ -51,6 +56,15 @@ type AIServiceConfig struct {
 	URL string `yaml:"url"`
 }
 
+// PolicyConfig holds the guardrails applied to AI recommendations.
+type PolicyConfig struct {
+	MinReplicas        int      `yaml:"min_replicas"`
+	MaxStepDownPercent float64  `yaml:"max_step_down_percent"`
+	MinConfidence      float64  `yaml:"min_confidence"`
+	MinCPURequest      float64  `yaml:"min_cpu_request"`
+	ExcludedNamespaces []string `yaml:"excluded_namespaces"`
+}
+
 // APIConfig holds dashboard API configuration.
 type APIConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
@@ -64,6 +78,7 @@ type Config struct {
 	Logging    LoggingConfig    `yaml:"logging"`
 	Storage    StorageConfig    `yaml:"storage"`
 	AIService  AIServiceConfig  `yaml:"ai_service"`
+	Policy     PolicyConfig     `yaml:"policy"`
 	API        APIConfig        `yaml:"api"`
 }
 
@@ -88,6 +103,8 @@ func Load(path string) (*Config, error) {
 
 	// Apply environment variable overrides
 	applyEnvOverrides(config)
+
+	applyDefaults(config)
 
 	// Validate configuration
 	if err := validate(config); err != nil {
@@ -151,6 +168,34 @@ func applyEnvOverrides(config *Config) {
 	}
 	if val := os.Getenv("WATCHDOG_API_ALLOWED_ORIGINS"); val != "" {
 		config.API.AllowedOrigins = strings.Split(val, ",")
+	}
+}
+
+// applyDefaults fills optional settings that were omitted from every config source.
+func applyDefaults(config *Config) {
+	if config.Prometheus.HistoryWindow == "" {
+		config.Prometheus.HistoryWindow = "24h"
+	}
+	if config.Prometheus.HistoryStep == "" {
+		config.Prometheus.HistoryStep = "15m"
+	}
+	if config.OpenCost.Window == "" {
+		config.OpenCost.Window = "1d"
+	}
+	if config.Policy.MinReplicas == 0 {
+		config.Policy.MinReplicas = 2
+	}
+	if config.Policy.MaxStepDownPercent == 0 {
+		config.Policy.MaxStepDownPercent = 0.30
+	}
+	if config.Policy.MinConfidence == 0 {
+		config.Policy.MinConfidence = 0.60
+	}
+	if config.Policy.MinCPURequest == 0 {
+		config.Policy.MinCPURequest = 0.05
+	}
+	if config.Policy.ExcludedNamespaces == nil {
+		config.Policy.ExcludedNamespaces = []string{"kube-system", "monitoring", "watchdog"}
 	}
 }
 

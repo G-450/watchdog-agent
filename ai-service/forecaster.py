@@ -40,11 +40,11 @@ def generate_multi_horizon_forecast(workload: Dict[str, Any]) -> Dict[str, Any]:
     Generates multi-horizon time-series predictions (30min, 6h, 24h, 7d)
     for CPU and Memory usage with confidence scoring and volatility bounds.
     """
-    cpu_usage = float(workload.get("CPUUsage") or 0.0)
-    mem_usage = float(workload.get("MemUsage") or 0.0)
+    cpu_usage = float(workload.get("cpu_usage") or 0.0)
+    mem_usage = float(workload.get("mem_usage") or 0.0)
     
-    cpu_history = workload.get("CPUHistory") or []
-    mem_history = workload.get("MemHistory") or []
+    cpu_history = workload.get("cpu_history") or []
+    mem_history = workload.get("mem_history") or []
     
     # Assess telemetry quality based on available signals
     quality_factors = []

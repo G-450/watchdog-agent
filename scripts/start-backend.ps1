@@ -7,9 +7,13 @@ param(
     [string]$OpenCostNamespace = "opencost",
     [switch]$Recreate,
     [switch]$NoAttach,
+    [switch]$NoDashboard,
     [switch]$SkipDependencyInstall,
     [switch]$Stop
 )
+
+# Launches the full Watchdog local stack in one psmux session:
+#   prometheus (9090), opencost (9003), ai-service (8000), agent (8081), dashboard (3000)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -20,6 +24,7 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 $agentRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $agentRoot
 $aiServiceRoot = Join-Path $agentRoot "ai-service"
+$dashboardRoot = Join-Path $workspaceRoot "watchdog-dashboard"
 $requirementsPath = Join-Path $aiServiceRoot "requirements.txt"
 $venvRoot = Join-Path $agentRoot ".venv"
 $venvPython = Join-Path $venvRoot "Scripts\python.exe"
@@ -28,83 +33,71 @@ function Get-RequiredCommand {
     param([Parameter(Mandatory)][string[]]$Names)
 
     foreach ($name in $Names) {
-        $command = Get-Command $name -ErrorAction SilentlyContinue
+        $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($command) {
             return $command.Source
         }
     }
-
-    throw "Required command not found: $($Names -join ' or '). Ensure it is installed and available in PATH."
+    throw "Required command not found: $($Names -join ' or '). Ensure it is installed and on PATH."
 }
 
 function Invoke-Mux {
-    param(
-        [Parameter(Mandatory)][string]$Executable,
-        [Parameter(Mandatory)][string[]]$Arguments,
-        [switch]$AllowFailure
-    )
+    param([Parameter(Mandatory)][string[]]$Arguments, [switch]$AllowFailure)
 
-    & $Executable @Arguments
-    $exitCode = $LASTEXITCODE
-    if (-not $AllowFailure -and $exitCode -ne 0) {
-        throw "psmux command failed with exit code ${exitCode}: $($Arguments -join ' ')"
+    & $script:mux @Arguments
+    if (-not $AllowFailure -and $LASTEXITCODE -ne 0) {
+        throw "psmux command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
     }
-    return $exitCode
 }
 
 function Test-MuxSession {
-    param(
-        [Parameter(Mandatory)][string]$Executable,
-        [Parameter(Mandatory)][string]$Name
-    )
-
-    & $Executable has-session -t $Name 2>$null
+    & $script:mux has-session -t $SessionName 2>$null
     return $LASTEXITCODE -eq 0
 }
 
 function Assert-PortAvailable {
     param([Parameter(Mandatory)][int]$Port)
 
-    $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
-    if ($listener) {
-        throw "Port $Port is already in use. Stop the existing process or attach to the existing psmux session."
+    if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
+        throw "Port $Port is already in use. Stop the process using it, or run with -Recreate if it is an old Watchdog session."
     }
 }
 
 function Assert-KubernetesService {
-    param(
-        [Parameter(Mandatory)][string]$Kubectl,
-        [Parameter(Mandatory)][string]$Namespace,
-        [Parameter(Mandatory)][string]$Service
-    )
+    param([Parameter(Mandatory)][string]$Namespace, [Parameter(Mandatory)][string]$Service)
 
-    & $Kubectl get service $Service --namespace $Namespace --output name *> $null
+    & $script:kubectl get service $Service --namespace $Namespace --output name *> $null
     if ($LASTEXITCODE -ne 0) {
-        throw "Kubernetes service '$Service' was not found in namespace '$Namespace'. Run: kubectl get svc -n $Namespace"
+        throw "Kubernetes service '$Service' not found in namespace '$Namespace'. Check: kubectl get svc -n $Namespace"
     }
 }
 
-function New-MuxWindow {
-    param(
-        [Parameter(Mandatory)][string]$Executable,
-        [Parameter(Mandatory)][string]$Session,
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$WorkingDirectory,
-        [Parameter(Mandatory)][string]$Command
-    )
-
-    Invoke-Mux -Executable $Executable -Arguments @(
-        "new-window", "-d", "-t", $Session, "-n", $Name,
-        "-c", $WorkingDirectory, "--",
-        $pwsh, "-NoLogo", "-NoExit", "-Command", $Command
-    ) | Out-Null
+function Quote([string]$Value) {
+    return "'" + $Value.Replace("'", "''") + "'"
 }
 
-$mux = Get-RequiredCommand -Names @("psmux", "tmux", "pmux")
+function Add-MuxWindow {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [Parameter(Mandatory)][string]$Command,
+        [switch]$First
+    )
+
+    $target = if ($First) { @("new-session", "-d", "-s", $SessionName) } else { @("new-window", "-d", "-t", $SessionName) }
+    Invoke-Mux -Arguments ($target + @(
+        "-n", $Name, "-c", $WorkingDirectory, "--",
+        $script:pwsh, "-NoLogo", "-NoExit", "-Command", $Command
+    ))
+}
+
+$mux = Get-RequiredCommand -Names @("psmux", "tmux")
+
+# --- Stop / existing session handling ---------------------------------------
 
 if ($Stop) {
-    if (Test-MuxSession -Executable $mux -Name $SessionName) {
-        Invoke-Mux -Executable $mux -Arguments @("kill-session", "-t", $SessionName) | Out-Null
+    if (Test-MuxSession) {
+        Invoke-Mux -Arguments @("kill-session", "-t", $SessionName)
         Write-Host "Stopped psmux session '$SessionName'." -ForegroundColor Green
     } else {
         Write-Host "No psmux session named '$SessionName' is running." -ForegroundColor Yellow
@@ -112,98 +105,109 @@ if ($Stop) {
     return
 }
 
-if (Test-MuxSession -Executable $mux -Name $SessionName) {
+if (Test-MuxSession) {
     if ($Recreate) {
-        Invoke-Mux -Executable $mux -Arguments @("kill-session", "-t", $SessionName) | Out-Null
-        Start-Sleep -Milliseconds 500
+        Invoke-Mux -Arguments @("kill-session", "-t", $SessionName)
+        Start-Sleep -Seconds 2
     } else {
         Write-Host "Session '$SessionName' is already running." -ForegroundColor Yellow
         if (-not $NoAttach) {
-            Invoke-Mux -Executable $mux -Arguments @("attach-session", "-t", $SessionName) | Out-Null
+            Invoke-Mux -Arguments @("attach-session", "-t", $SessionName) -AllowFailure
         }
         return
     }
 }
 
+# --- Preflight checks ---------------------------------------------------------
+
 $kubectl = Get-RequiredCommand -Names @("kubectl")
 $go = Get-RequiredCommand -Names @("go")
 $pwsh = Get-RequiredCommand -Names @("pwsh")
+$npm = $null
+if (-not $NoDashboard) {
+    $npm = Get-RequiredCommand -Names @("npm.cmd", "npm")
+    if (-not (Test-Path -LiteralPath $dashboardRoot)) {
+        throw "Dashboard directory not found at '$dashboardRoot'. Run with -NoDashboard to skip it."
+    }
+}
 
 Write-Host "Checking Kubernetes access..." -ForegroundColor Cyan
 & $kubectl cluster-info *> $null
 if ($LASTEXITCODE -ne 0) {
-    throw "The current Kubernetes context is unavailable. Run 'kubectl config current-context' and 'kubectl cluster-info'."
+    throw "The current Kubernetes context is unavailable. Check 'kubectl config current-context' and 'kubectl cluster-info'."
 }
+Assert-KubernetesService -Namespace $PrometheusNamespace -Service $PrometheusService
+Assert-KubernetesService -Namespace $OpenCostNamespace -Service $OpenCostService
 
-Assert-KubernetesService -Kubectl $kubectl -Namespace $PrometheusNamespace -Service $PrometheusService
-Assert-KubernetesService -Kubectl $kubectl -Namespace $OpenCostNamespace -Service $OpenCostService
-
-foreach ($port in @(9090, 9003, 8000, 8081)) {
-    Assert-PortAvailable -Port $port
-}
+$ports = @(9090, 9003, 8000, 8081)
+if (-not $NoDashboard) { $ports += 3000 }
+foreach ($port in $ports) { Assert-PortAvailable -Port $port }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    throw "Existing Python virtual environment not found at '$venvRoot'. Expected interpreter: '$venvPython'."
+    throw "Python virtual environment not found. Expected interpreter: '$venvPython'."
 }
 
 & $venvPython -c "import fastapi, uvicorn, langgraph, langchain, pandas, pydantic" 2>$null
-$dependenciesReady = $LASTEXITCODE -eq 0
-if (-not $dependenciesReady) {
+if ($LASTEXITCODE -ne 0) {
     if ($SkipDependencyInstall) {
         throw "AI service dependencies are missing. Rerun without -SkipDependencyInstall."
     }
-
     Write-Host "Installing AI service dependencies..." -ForegroundColor Cyan
-    & $venvPython -m pip install --upgrade pip
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to upgrade pip."
-    }
     & $venvPython -m pip install -r $requirementsPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install AI service dependencies."
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Failed to install AI service dependencies." }
 }
 
-$escapedKubectl = $kubectl.Replace("'", "''")
-$escapedGo = $go.Replace("'", "''")
-$prometheusCommand = "Write-Host 'Prometheus -> http://localhost:9090' -ForegroundColor Green; & '$escapedKubectl' port-forward svc/$PrometheusService -n $PrometheusNamespace 9090:9090"
-$openCostCommand = "Write-Host 'OpenCost -> http://localhost:9003' -ForegroundColor Green; & '$escapedKubectl' port-forward svc/$OpenCostService -n $OpenCostNamespace 9003:9003"
-$escapedPython = $venvPython.Replace("'", "''")
-$aiCommand = "Write-Host 'AI service -> http://localhost:8000' -ForegroundColor Green; & '$escapedPython' -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-$agentCommand = @"
-`$env:WATCHDOG_PROMETHEUS_URL = "http://localhost:9090"
-`$env:WATCHDOG_OPENCOST_URL = "http://localhost:9003"
-`$env:WATCHDOG_AI_SERVICE_URL = "http://localhost:8000"
-`$env:WATCHDOG_STORAGE_PATH = "./data.db"
-`$env:WATCHDOG_API_ALLOWED_ORIGINS = "http://localhost:3000"
-Write-Host "Watchdog agent API -> http://localhost:8081" -ForegroundColor Green
-Start-Sleep -Seconds 3
-& '$escapedGo' run ./cmd/agent
-"@
+# --- Window commands ----------------------------------------------------------
+
+$prometheusCommand = "Write-Host 'Prometheus -> http://localhost:9090' -ForegroundColor Green; & $(Quote $kubectl) port-forward svc/$PrometheusService -n $PrometheusNamespace 9090:9090"
+$openCostCommand = "Write-Host 'OpenCost -> http://localhost:9003' -ForegroundColor Green; & $(Quote $kubectl) port-forward svc/$OpenCostService -n $OpenCostNamespace 9003:9003"
+$aiCommand = "Write-Host 'AI service -> http://localhost:8000' -ForegroundColor Green; & $(Quote $venvPython) -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
+$agentCommand = @(
+    '$env:WATCHDOG_PROMETHEUS_URL = ''http://localhost:9090'''
+    '$env:WATCHDOG_OPENCOST_URL = ''http://localhost:9003'''
+    '$env:WATCHDOG_AI_SERVICE_URL = ''http://localhost:8000'''
+    '$env:WATCHDOG_STORAGE_PATH = ''./data.db'''
+    '$env:WATCHDOG_API_ALLOWED_ORIGINS = ''http://localhost:3000'''
+    "Write-Host 'Watchdog agent API -> http://localhost:8081' -ForegroundColor Green"
+    'Start-Sleep -Seconds 3'
+    "& $(Quote $go) run ./cmd/agent"
+) -join '; '
+
+# --- Launch -------------------------------------------------------------------
 
 Write-Host "Creating psmux session '$SessionName'..." -ForegroundColor Cyan
-Invoke-Mux -Executable $mux -Arguments @(
-    "new-session", "-d", "-s", $SessionName, "-n", "prometheus",
-    "-c", $workspaceRoot, "--",
-    $pwsh, "-NoLogo", "-NoExit", "-Command", $prometheusCommand
-) | Out-Null
+Add-MuxWindow -First -Name "prometheus" -WorkingDirectory $workspaceRoot -Command $prometheusCommand
 
 try {
-    New-MuxWindow -Executable $mux -Session $SessionName -Name "opencost" -WorkingDirectory $workspaceRoot -Command $openCostCommand
-    New-MuxWindow -Executable $mux -Session $SessionName -Name "ai-service" -WorkingDirectory $aiServiceRoot -Command $aiCommand
-    New-MuxWindow -Executable $mux -Session $SessionName -Name "agent" -WorkingDirectory $agentRoot -Command $agentCommand
-    Invoke-Mux -Executable $mux -Arguments @("select-window", "-t", "${SessionName}:agent") | Out-Null
+    Add-MuxWindow -Name "opencost" -WorkingDirectory $workspaceRoot -Command $openCostCommand
+    Add-MuxWindow -Name "ai-service" -WorkingDirectory $aiServiceRoot -Command $aiCommand
+    Add-MuxWindow -Name "agent" -WorkingDirectory $agentRoot -Command $agentCommand
+
+    $windows = "prometheus, opencost, ai-service, agent"
+    if (-not $NoDashboard) {
+        $dashboardCommand = @(
+            "if (-not (Test-Path node_modules)) { & $(Quote $npm) ci }"
+            "Write-Host 'Dashboard -> http://localhost:3000' -ForegroundColor Green"
+            'Start-Sleep -Seconds 5'
+            "& $(Quote $npm) run dev"
+        ) -join '; '
+        Add-MuxWindow -Name "dashboard" -WorkingDirectory $dashboardRoot -Command $dashboardCommand
+        $windows += ", dashboard"
+    }
+
+    Invoke-Mux -Arguments @("select-window", "-t", "${SessionName}:agent")
 } catch {
-    Invoke-Mux -Executable $mux -Arguments @("kill-session", "-t", $SessionName) -AllowFailure | Out-Null
+    Invoke-Mux -Arguments @("kill-session", "-t", $SessionName) -AllowFailure
     throw
 }
 
-Write-Host "Watchdog backend is running in psmux session '$SessionName'." -ForegroundColor Green
-Write-Host "Windows: prometheus, opencost, ai-service, agent"
-Write-Host "Detach: Ctrl+b, then d"
-Write-Host "Reattach: psmux attach-session -t $SessionName"
-Write-Host "Stop: .\scripts\start-backend.ps1 -Stop"
+Write-Host "Watchdog is running in psmux session '$SessionName'." -ForegroundColor Green
+Write-Host "Windows:   $windows"
+Write-Host "Switch:    Ctrl+b then n / p (or 0-4)"
+Write-Host "Detach:    Ctrl+b then d"
+Write-Host "Reattach:  psmux attach -t $SessionName"
+Write-Host "Stop:      .\scripts\start-backend.ps1 -Stop"
 
 if (-not $NoAttach) {
-    Invoke-Mux -Executable $mux -Arguments @("attach-session", "-t", $SessionName) | Out-Null
+    Invoke-Mux -Arguments @("attach-session", "-t", $SessionName) -AllowFailure
 }

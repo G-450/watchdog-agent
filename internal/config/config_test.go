@@ -116,3 +116,42 @@ agent:
 		t.Fatal("Expected error due to missing required fields, got nil")
 	}
 }
+
+func TestLoadConfig_Defaults(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	minimal := []byte("agent:\n  port: 8081\nprometheus:\n  url: \"http://prom:9090\"\nopencost:\n  url: \"http://cost:9003\"\npolicy:\n  min_confidence: 0.75\n")
+	if err := os.WriteFile(configPath, minimal, 0644); err != nil {
+		t.Fatalf("failed to write test config file: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	tests := []struct {
+		name      string
+		got, want interface{}
+	}{
+		{"history window", cfg.Prometheus.HistoryWindow, "24h"},
+		{"history step", cfg.Prometheus.HistoryStep, "15m"},
+		{"cost window", cfg.OpenCost.Window, "1d"},
+		{"min replicas", cfg.Policy.MinReplicas, 2},
+		{"max step-down", cfg.Policy.MaxStepDownPercent, 0.30},
+		{"configured confidence is kept", cfg.Policy.MinConfidence, 0.75},
+		{"excluded namespaces", len(cfg.Policy.ExcludedNamespaces), 3},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s: got %v, want %v", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestLoadConfig_RepositoryDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "configs", "config.yaml"))
+	if err != nil {
+		t.Fatalf("configs/config.yaml does not load: %v", err)
+	}
+	if cfg.Policy.MaxStepDownPercent != 0.30 || cfg.OpenCost.Window == "" {
+		t.Errorf("unexpected repository defaults: %+v %+v", cfg.Policy, cfg.OpenCost)
+	}
+}
