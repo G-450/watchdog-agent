@@ -226,7 +226,7 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 				approvedRecs = append(approvedRecs, *rec)
 			}
 		}
-		
+
 		slog.Info("Analysis complete", slog.Int("recommendations", len(recs)), slog.Int("approved", len(approvedRecs)))
 
 		if len(approvedRecs) > 0 {

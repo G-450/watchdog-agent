@@ -14,7 +14,7 @@ RUN apk add --no-cache git
 WORKDIR /app
 COPY --from=builder /app/watchdog-agent /app/watchdog-agent
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
+RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+USER 1001
 
 ENTRYPOINT ["/app/watchdog-agent"]
