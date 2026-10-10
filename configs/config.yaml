@@ -61,3 +61,7 @@ gitops:
   author_name: "Watchdog Agent"
   author_email: "watchdog-agent@users.noreply.github.com"
   cooldown: "24h"                # after a merged PR, wait this long before proposing another change to that workload
+  auth: "token"                  # token: GITHUB_TOKEN env var; app: GitHub App installation (settings below)
+  app_id: 0
+  installation_id: 0
+  private_key_path: "/etc/watchdog/github-app/private-key.pem"

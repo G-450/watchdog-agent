@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -243,24 +244,45 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 }
 
 // newPRGenerator returns the GitOps PR generator, or nil when GitOps is disabled or cannot start.
-// A missing token disables GitOps instead of stopping the agent.
+// Missing credentials disable GitOps instead of stopping the agent.
 func newPRGenerator(cfg *config.Config) *gitops.Generator {
 	if !cfg.GitOps.Enabled {
 		slog.Info("GitOps PR generation disabled")
 		return nil
 	}
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		slog.Error("gitops.enabled is true but GITHUB_TOKEN is not set; GitOps PR generation disabled")
+	tokens, err := gitHubTokens(cfg.GitOps)
+	if err != nil {
+		slog.Error("GitOps credentials unavailable; GitOps PR generation disabled", slog.Any("error", err))
 		return nil
 	}
-	gen, err := gitops.New(cfg.GitOps, cfg.Policy.ExcludedNamespaces, token)
+	gen, err := gitops.New(cfg.GitOps, cfg.Policy.ExcludedNamespaces, tokens)
 	if err != nil {
 		slog.Error("Failed to initialize GitOps PR generator; GitOps PR generation disabled", slog.Any("error", err))
 		return nil
 	}
-	slog.Info("GitOps PR generation enabled", slog.String("repo", cfg.GitOps.Repo))
+	slog.Info("GitOps PR generation enabled", slog.String("repo", cfg.GitOps.Repo), slog.String("auth", cfg.GitOps.Auth))
 	return gen
+}
+
+// gitHubTokens builds the token source selected by gitops.auth.
+func gitHubTokens(cfg config.GitOpsConfig) (gitops.TokenSource, error) {
+	if cfg.Auth != "app" {
+		token := os.Getenv("GITHUB_TOKEN")
+		if token == "" {
+			return nil, fmt.Errorf("gitops.auth is token but GITHUB_TOKEN is not set")
+		}
+		return gitops.StaticToken(token), nil
+	}
+	key, err := os.ReadFile(cfg.PrivateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read GitHub App private key: %w", err)
+	}
+	timeout, err := time.ParseDuration(cfg.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("gitops.timeout: %w", err)
+	}
+	_, repo, _ := strings.Cut(cfg.Repo, "/")
+	return gitops.NewAppTokenSource(cfg.AppID, cfg.InstallationID, key, []string{repo}, cfg.APIURL, timeout)
 }
 
 // collectWorkload builds a deployment's snapshot from its spec, telemetry, and cost allocation.

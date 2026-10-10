@@ -183,6 +183,9 @@ func TestLoadConfig_GitOps(t *testing.T) {
 		{name: "bad cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"a while\"\n", wantErr: true},
 		{name: "negative cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"-1h\"\n", wantErr: true},
 		{name: "zero cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"0\"\n", wantEnabled: true, wantRepo: "o/r"},
+		{name: "app auth with ids", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: app\n  app_id: 1\n  installation_id: 2\n", wantEnabled: true, wantRepo: "o/r"},
+		{name: "app auth without ids", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: app\n", wantErr: true},
+		{name: "unknown auth", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: oauth\n", wantErr: true},
 		{
 			name:     "unparseable env value is ignored",
 			yaml:     base + "gitops:\n  repo: \"o/r\"\n",
