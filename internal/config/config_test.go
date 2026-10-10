@@ -186,6 +186,11 @@ func TestLoadConfig_GitOps(t *testing.T) {
 		{name: "app auth with ids", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: app\n  app_id: 1\n  installation_id: 2\n", wantEnabled: true, wantRepo: "o/r"},
 		{name: "app auth without ids", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: app\n", wantErr: true},
 		{name: "unknown auth", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  auth: oauth\n", wantErr: true},
+		{name: "verification defaults", yaml: base + "verification:\n  enabled: true\n"},
+		{name: "bad verification window", yaml: base + "verification:\n  enabled: true\n  window: \"half an hour\"\n", wantErr: true},
+		{name: "negative rollout timeout", yaml: base + "verification:\n  enabled: true\n  rollout_timeout: \"-5m\"\n", wantErr: true},
+		{name: "negative max rollbacks", yaml: base + "verification:\n  enabled: true\n  max_rollbacks: -1\n", wantErr: true},
+		{name: "verification off ignores bad values", yaml: base + "verification:\n  window: \"soon\"\n"},
 		{
 			name:     "unparseable env value is ignored",
 			yaml:     base + "gitops:\n  repo: \"o/r\"\n",

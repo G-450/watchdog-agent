@@ -72,6 +72,11 @@ func (c *Client) GetDeployments(ctx context.Context, namespace string) (*appsv1.
 	return c.ClientSet.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 }
 
+// GetDeployment retrieves one deployment.
+func (c *Client) GetDeployment(ctx context.Context, namespace, name string) (*appsv1.Deployment, error) {
+	return c.ClientSet.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
 // GetServices retrieves all services in a given namespace.
 func (c *Client) GetServices(ctx context.Context, namespace string) (*corev1.ServiceList, error) {
 	return c.ClientSet.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})

@@ -37,6 +37,21 @@ type Store interface {
 	// GetRecommendations retrieves the newest recommendations matching the query.
 	GetRecommendations(ctx context.Context, query RecommendationQuery) ([]*model.Recommendation, error)
 
+	// SaveVerification creates or replaces the verification for v.PR.
+	SaveVerification(ctx context.Context, v *model.Verification) error
+
+	// GetVerification returns the verification for a PR, or nil if there is none.
+	GetVerification(ctx context.Context, pr int) (*model.Verification, error)
+
+	// GetVerifications returns up to limit verifications, most recently merged first.
+	GetVerifications(ctx context.Context, limit int) ([]*model.Verification, error)
+
+	// SetHaltedWorkloads replaces the set of workloads Watchdog has stopped changing.
+	SetHaltedWorkloads(ctx context.Context, halted []model.HaltedWorkload) error
+
+	// GetHaltedWorkloads returns the workloads Watchdog has stopped changing.
+	GetHaltedWorkloads(ctx context.Context) ([]model.HaltedWorkload, error)
+
 	// Close cleanly closes the storage connection.
 	Close() error
 }

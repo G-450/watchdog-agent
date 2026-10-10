@@ -23,6 +23,7 @@ import (
 	"watchdog-agent/internal/reasoning"
 	"watchdog-agent/internal/storage"
 	"watchdog-agent/internal/telemetry"
+	"watchdog-agent/internal/verify"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -70,6 +71,7 @@ func main() {
 	aiClient := reasoning.NewClient(cfg)
 	policyValidator := policy.NewFromConfig(cfg.Policy)
 	prGenerator := newPRGenerator(cfg)
+	verifier := newVerifier(cfg, prGenerator, promClient, k8sClient, store)
 
 	// Setup Graceful Shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -106,7 +108,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Run first cycle immediately
-	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator)
+	runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator, verifier)
 
 	// Loop
 	for {
@@ -118,12 +120,12 @@ func main() {
 			cancelShutdown()
 			return
 		case <-ticker.C:
-			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator)
+			runCycle(ctx, cfg, k8sClient, promClient, finopsClient, store, aiClient, policyValidator, prGenerator, verifier)
 		}
 	}
 }
 
-func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store, aiClient *reasoning.Client, validator policy.Validator, prGenerator *gitops.Generator) {
+func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, promClient *telemetry.Client, finopsClient *finops.Client, store storage.Store, aiClient *reasoning.Client, validator policy.Validator, prGenerator *gitops.Generator, verifier *verify.Verifier) {
 	slog.Info("--- Starting Reconciliation Cycle ---")
 	startTime := time.Now().UTC()
 
@@ -198,6 +200,12 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 	}
 	slog.Info("Cluster snapshot persisted successfully", slog.Int64("snapshot_id", snapshotID))
 
+	// Verify merged changes first, so a workload halted this cycle gets no new proposal.
+	var halted map[string]model.HaltedWorkload
+	if verifier != nil {
+		halted = verifier.Run(ctx)
+	}
+
 	// Send to AI Service
 	recs, err := aiClient.Analyze(ctx, clusterSnap, history)
 	if err != nil {
@@ -207,6 +215,14 @@ func runCycle(ctx context.Context, cfg *config.Config, k8sClient *k8s.Client, pr
 		for _, rec := range recs {
 			if err := validator.Validate(rec); err != nil {
 				slog.Info("Recommendation rejected by policy",
+					slog.String("target", rec.Target),
+					slog.String("action", rec.Action),
+					slog.String("reason", rec.RejectionReason))
+				continue
+			}
+			if h, ok := halted[rec.Target]; ok {
+				rec.Status, rec.RejectionReason = "Rejected", verify.HaltReason(h)
+				slog.Info("Recommendation rejected: workload halted",
 					slog.String("target", rec.Target),
 					slog.String("action", rec.Action),
 					slog.String("reason", rec.RejectionReason))
@@ -262,6 +278,21 @@ func newPRGenerator(cfg *config.Config) *gitops.Generator {
 	}
 	slog.Info("GitOps PR generation enabled", slog.String("repo", cfg.GitOps.Repo), slog.String("auth", cfg.GitOps.Auth))
 	return gen
+}
+
+// newVerifier returns the post-deployment verifier, or nil when verification or GitOps is off.
+func newVerifier(cfg *config.Config, prGenerator *gitops.Generator, promClient *telemetry.Client, k8sClient *k8s.Client, store storage.Store) *verify.Verifier {
+	if !cfg.Verify.Enabled || prGenerator == nil {
+		slog.Info("Post-deployment verification disabled")
+		return nil
+	}
+	v, err := verify.New(cfg.Verify, prGenerator, promClient, k8sClient, store)
+	if err != nil {
+		slog.Error("Failed to initialize post-deployment verification; disabled", slog.Any("error", err))
+		return nil
+	}
+	slog.Info("Post-deployment verification enabled", slog.String("window", cfg.Verify.Window))
+	return v
 }
 
 // gitHubTokens builds the token source selected by gitops.auth.

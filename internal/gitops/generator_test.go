@@ -93,6 +93,7 @@ type fakeGitHub struct {
 	calls    []string // "METHOD /path"
 	bodies   map[string]string
 	prs      map[string][]pullRequest // by head branch, any state
+	closed   []pullRequest            // served for the closed-PR listing
 	failPOST int                      // status code for POST /pulls, 0 = succeed
 	failBody string
 }
@@ -128,6 +129,11 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	const repo = "/repos/o/r/"
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == repo+"pulls" && r.URL.Query().Get("state") == "closed":
+		if q := r.URL.Query(); q.Get("base") != "main" || q.Get("sort") != "updated" || q.Get("direction") != "desc" {
+			f.t.Errorf("unexpected closed-PR query %q", r.URL.RawQuery)
+		}
+		writeJSON(f.t, w, http.StatusOK, f.closed)
 	case r.Method == http.MethodGet && r.URL.Path == repo+"pulls":
 		if want := "o:"; !strings.HasPrefix(r.URL.Query().Get("head"), want) || r.URL.Query().Get("state") != "all" {
 			f.t.Errorf("unexpected PR query %q", r.URL.RawQuery)
@@ -218,6 +224,135 @@ func newTestEnv(t *testing.T) *testEnv {
 	return &testEnv{bare: bare, api: api, gen: gen}
 }
 
+func TestOpenRollback(t *testing.T) {
+	requireGit(t)
+	const branch = "watchdog/rollback-default-yolo-detector"
+	findings := []string{"3 container restarts after the change, 0 in the 30m0s before it."}
+
+	t.Run("opens a PR restoring the previous values, ignoring the cooldown", func(t *testing.T) {
+		e := newTestEnv(t)
+		withMergedPR("watchdog/default-yolo-detector", time.Hour)(e)
+		e.api.prs[branch] = []pullRequest{{Number: 2, State: "closed", MergedAt: e.api.prs["watchdog/default-yolo-detector"][0].MergedAt,
+			Body: "<!-- watchdog:changes {\"cpu\":\"300m\"} -->"}}
+		pr, err := e.gen.OpenRollback(context.Background(), "default/yolo-detector", ChangeSet{CPU: "250m"}, 7, findings)
+		if err != nil || pr != 7 { // the fake API numbers every new PR 7
+			t.Fatalf("OpenRollback = %d, %v", pr, err)
+		}
+		added, removed := e.diffLines(t, branch)
+		if len(added) != 1 || !strings.Contains(added[0], `cpu: "250m"`) || len(removed) != 1 {
+			t.Errorf("want a one-line restore, got +%q -%q", added, removed)
+		}
+		body := e.api.bodies["POST"]
+		for _, s := range []string{"## Watchdog rollback", "**Target:** `default/yolo-detector`", "verification of #7",
+			"| CPU request | `500m` | `250m` |", findings[0], `<!-- watchdog:changes {"cpu":"250m"} -->`, "<!-- watchdog:rollback-of 7 -->"} {
+			if !strings.Contains(body, s) {
+				t.Errorf("rollback body missing %q:\n%s", s, body)
+			}
+		}
+		msg := git(t, e.bare, "log", "-1", "--format=%s", branch)
+		if !strings.Contains(msg, "roll back #7 cpu 500m→250m") {
+			t.Errorf("unexpected commit %q", msg)
+		}
+	})
+
+	t.Run("open rollback PR is reported, not duplicated", func(t *testing.T) {
+		e := newTestEnv(t)
+		e.api.prs[branch] = []pullRequest{{Number: 12, State: "open", Body: "<!-- watchdog:changes {\"cpu\":\"250m\"} -->"}}
+		pr, err := e.gen.OpenRollback(context.Background(), "default/yolo-detector", ChangeSet{CPU: "250m"}, 7, findings)
+		if err != nil || pr != 12 || e.api.count("POST") != 0 {
+			t.Fatalf("want the open PR #12 and no POST, got %d, %v, %v", pr, err, e.api.calls)
+		}
+	})
+
+	t.Run("declined rollback returns 0", func(t *testing.T) {
+		e := newTestEnv(t)
+		e.api.prs[branch] = []pullRequest{{Number: 12, State: "closed", Body: "<!-- watchdog:changes {\"cpu\":\"250m\"} -->"}}
+		pr, err := e.gen.OpenRollback(context.Background(), "default/yolo-detector", ChangeSet{CPU: "250m"}, 7, findings)
+		if err != nil || pr != 0 || branchExists(e.bare, branch) {
+			t.Fatalf("want 0 and no push, got %d, %v", pr, err)
+		}
+	})
+
+	for _, tt := range []struct{ name, target string }{
+		{"excluded namespace", "monitoring/prometheus"},
+		{"malformed target", "yolo-detector"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEnv(t)
+			if _, err := e.gen.OpenRollback(context.Background(), tt.target, ChangeSet{CPU: "250m"}, 7, nil); err == nil {
+				t.Error("want an error")
+			}
+			if n := e.api.count(""); n != 0 {
+				t.Errorf("want no API calls, got %v", e.api.calls)
+			}
+		})
+	}
+}
+
+func TestMergedChanges(t *testing.T) {
+	e := newTestEnv(t)
+	at := func(s string) *string { return &s }
+	pr := func(n int, ref string, merged *string, body string) pullRequest {
+		p := pullRequest{Number: n, State: "closed", MergedAt: merged, Body: body, HTMLURL: fmt.Sprintf("https://example/pr/%d", n)}
+		p.Head.Ref = ref
+		return p
+	}
+	change := "**Target:** `default/yolo-detector` (Deployment)\n<!-- watchdog:changes {\"cpu\":\"350m\"} -->\n"
+	e.api.closed = []pullRequest{
+		pr(11, "watchdog/rollback-default-yolo-detector", at("2026-10-10T11:00:00Z"),
+			"**Target:** `default/yolo-detector`\n<!-- watchdog:changes {\"cpu\":\"500m\"} -->\n<!-- watchdog:rollback-of 10 -->"),
+		pr(10, "watchdog/default-yolo-detector", at("2026-10-10T10:00:00Z"), change+"<!-- watchdog:previous {\"cpu\":\"500m\"} -->"),
+		pr(9, "watchdog/default-yolo-detector", nil, change),                           // declined
+		pr(8, "feature/enable-gitops", at("2026-10-10T09:00:00Z"), change),             // a human's PR
+		pr(7, "watchdog/default-yolo-detector", at("2026-10-10T08:00:00Z"), change),    // no previous marker
+		pr(6, "watchdog/default-flask-calc", at("2026-10-10T07:00:00Z"), "no markers"), // unparseable
+		pr(5, "watchdog/default-yolo-detector", at("2026-10-01T00:00:00Z"), change),    // before since
+	}
+	got, err := e.gen.MergedChanges(context.Background(), time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want PRs 11, 10, 7, got %+v", got)
+	}
+	if got[0].PR != 11 || got[0].RollbackOf != 10 || got[0].Changes.CPU != "500m" {
+		t.Errorf("rollback PR parsed as %+v", got[0])
+	}
+	if got[1].PR != 10 || got[1].Target != "default/yolo-detector" || got[1].Previous == nil || got[1].Previous.CPU != "500m" ||
+		!got[1].MergedAt.Equal(time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)) || got[1].URL != "https://example/pr/10" {
+		t.Errorf("change PR parsed as %+v", got[1])
+	}
+	if got[2].PR != 7 || got[2].Previous != nil {
+		t.Errorf("PR without previous marker parsed as %+v", got[2])
+	}
+}
+
+func TestPreviousValues(t *testing.T) {
+	three := int32(3)
+	tests := []struct {
+		name  string
+		edits []fieldEdit
+		want  *ChangeSet
+	}{
+		{"cpu", []fieldEdit{{Field: "cpu", Old: "500m", New: "350m"}}, &ChangeSet{CPU: "500m"}},
+		{"all fields", []fieldEdit{{Field: "cpu", Old: "500m", New: "350m"}, {Field: "memory", Old: "1Gi", New: "512Mi"}, {Field: "replicas", Old: "3", New: "2"}},
+			&ChangeSet{CPU: "500m", Memory: "1Gi", Replicas: &three}},
+		{"field did not exist", []fieldEdit{{Field: "cpu", New: "250m"}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := previousValues(tt.edits)
+			if (tt.want != nil) != ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.want != nil)
+			}
+			if ok && (got.CPU != tt.want.CPU || got.Memory != tt.want.Memory || (got.Replicas == nil) != (tt.want.Replicas == nil) ||
+				(got.Replicas != nil && *got.Replicas != *tt.want.Replicas)) {
+				t.Errorf("got %+v, want %+v", got, *tt.want)
+			}
+		})
+	}
+}
+
 // withMergedPR records a Watchdog PR on branch merged `ago` before a fixed clock, with a 24h cooldown.
 func withMergedPR(branch string, ago time.Duration) func(e *testEnv) {
 	return func(e *testEnv) {
@@ -292,7 +427,8 @@ func TestApply(t *testing.T) {
 					t.Errorf("POST count = %d, want 1", n)
 				}
 				body := e.api.bodies["POST"]
-				for _, s := range []string{`<!-- watchdog:changes {"cpu":"350m"} -->`, "RIGHTSIZE_CPU_DOWN", "$3.60", "0.74", "human review"} {
+				for _, s := range []string{`<!-- watchdog:changes {"cpu":"350m"} -->`, `<!-- watchdog:previous {"cpu":"500m"} -->`,
+					"RIGHTSIZE_CPU_DOWN", "$3.60", "0.74", "human review"} {
 					if !strings.Contains(body, s) {
 						t.Errorf("PR body missing %q", s)
 					}

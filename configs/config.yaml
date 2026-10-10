@@ -65,3 +65,14 @@ gitops:
   app_id: 0
   installation_id: 0
   private_key_path: "/etc/watchdog/github-app/private-key.pem"
+
+verification:
+  enabled: true                  # verify merged Watchdog changes; needs gitops.enabled
+  window: "30m"                  # watch each change this long after rollout; the same span before the merge is the baseline
+  rollout_timeout: "30m"         # how long the new values may take to reach the cluster
+  lookback: "168h"               # how far back merged PRs are discovered
+  max_rollbacks: 2               # failed changes to one workload before Watchdog stops changing it
+  max_new_restarts: 0            # container restarts allowed above the baseline
+  max_throttle_increase: 0.10    # allowed rise in the CPU throttled-period ratio
+  max_replica_increase: 0.5      # allowed rise in average replicas (HPA scale-out)
+  min_availability: 0.9          # minimum average available/desired replicas
