@@ -88,6 +88,11 @@ type GitOpsConfig struct {
 	// Cooldown is how long after a merged Watchdog PR the agent waits before proposing
 	// another change to the same workload, so new telemetry reflects the change. "0" disables it.
 	Cooldown string `yaml:"cooldown"`
+	// Auth is "token" (GITHUB_TOKEN from the environment) or "app" (a GitHub App installation).
+	Auth           string `yaml:"auth"`
+	AppID          int64  `yaml:"app_id"`
+	InstallationID int64  `yaml:"installation_id"`
+	PrivateKeyPath string `yaml:"private_key_path"` // the App's PEM key, mounted from a Secret
 }
 
 type Config struct {
@@ -255,6 +260,12 @@ func applyDefaults(config *Config) {
 	if config.GitOps.Cooldown == "" {
 		config.GitOps.Cooldown = "24h"
 	}
+	if config.GitOps.Auth == "" {
+		config.GitOps.Auth = "token"
+	}
+	if config.GitOps.PrivateKeyPath == "" {
+		config.GitOps.PrivateKeyPath = "/etc/watchdog/github-app/private-key.pem"
+	}
 }
 
 // validate ensures required fields are set.
@@ -283,6 +294,15 @@ func validate(config *Config) error {
 			return fmt.Errorf("gitops.cooldown: %w", err)
 		} else if d < 0 {
 			return fmt.Errorf("gitops.cooldown must not be negative, got %s", d)
+		}
+		switch config.GitOps.Auth {
+		case "token":
+		case "app":
+			if config.GitOps.AppID <= 0 || config.GitOps.InstallationID <= 0 {
+				return fmt.Errorf("gitops.auth is app but app_id or installation_id is not set")
+			}
+		default:
+			return fmt.Errorf("gitops.auth must be token or app, got %q", config.GitOps.Auth)
 		}
 	}
 	return nil

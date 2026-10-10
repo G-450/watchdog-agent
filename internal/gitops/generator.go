@@ -24,7 +24,8 @@ import (
 type Generator struct {
 	cfg         config.GitOpsConfig
 	excluded    map[string]bool
-	token       string
+	tokens      TokenSource
+	token       string // current token, refreshed from tokens before each workload
 	owner, repo string
 	cloneURL    string        // tests point it at a local bare repository
 	http        *http.Client  // per-request timeout from cfg.Timeout
@@ -33,9 +34,9 @@ type Generator struct {
 	now         func() time.Time
 }
 
-// New validates cfg and builds a Generator. token is the GitHub token; it is required.
-func New(cfg config.GitOpsConfig, excluded []string, token string) (*Generator, error) {
-	if token == "" {
+// New validates cfg and builds a Generator that authenticates with tokens.
+func New(cfg config.GitOpsConfig, excluded []string, tokens TokenSource) (*Generator, error) {
+	if tokens == nil || tokens == StaticToken("") {
 		return nil, errors.New("gitops: GitHub token is empty")
 	}
 	owner, repo, ok := strings.Cut(cfg.Repo, "/")
@@ -69,7 +70,7 @@ func New(cfg config.GitOpsConfig, excluded []string, token string) (*Generator, 
 	return &Generator{
 		cfg:       cfg,
 		excluded:  ex,
-		token:     token,
+		tokens:    tokens,
 		owner:     owner,
 		repo:      repo,
 		cloneURL:  "https://github.com/" + owner + "/" + repo + ".git",
@@ -90,6 +91,7 @@ type workloadPlan struct {
 
 // Apply opens or updates one PR per workload for the approved recommendations in recs.
 // Each workload is handled independently; failures are logged and returned joined.
+// Calls must not overlap: the current token is shared generator state.
 func (g *Generator) Apply(ctx context.Context, recs []model.Recommendation) error {
 	var errs []error
 	for _, p := range g.plan(recs) {
@@ -154,6 +156,11 @@ func (g *Generator) plan(recs []model.Recommendation) []*workloadPlan {
 func (g *Generator) applyWorkloadWithDeadline(ctx context.Context, p *workloadPlan) error {
 	ctx, cancel := context.WithTimeout(ctx, g.opTimeout)
 	defer cancel()
+	token, err := g.tokens.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("get GitHub token: %w", err)
+	}
+	g.token = token
 	return g.applyWorkload(ctx, p)
 }
 

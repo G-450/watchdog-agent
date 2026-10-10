@@ -210,7 +210,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		BranchPrefix: "watchdog/", APIURL: srv.URL, Timeout: "10s", OperationTimeout: "1m",
 		AuthorName: "Watchdog Agent", AuthorEmail: "watchdog-agent@users.noreply.github.com",
 	}
-	gen, err := New(cfg, []string{"kube-system", "monitoring", "watchdog"}, fakeToken)
+	gen, err := New(cfg, []string{"kube-system", "monitoring", "watchdog"}, StaticToken(fakeToken))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -633,7 +633,7 @@ func TestNew(t *testing.T) {
 			if tt.mutate != nil {
 				tt.mutate(&cfg)
 			}
-			g, err := New(cfg, nil, tt.token)
+			g, err := New(cfg, nil, StaticToken(tt.token))
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
