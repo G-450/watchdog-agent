@@ -22,6 +22,9 @@ type pullRequest struct {
 	Body     string  `json:"body"`
 	HTMLURL  string  `json:"html_url"`
 	MergedAt *string `json:"merged_at"`
+	Head     struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
 }
 
 // githubError is a non-2xx response from the GitHub API.

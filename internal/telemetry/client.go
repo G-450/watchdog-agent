@@ -36,6 +36,11 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 // executeQuery is a helper to run PromQL and return a float64
 func (c *Client) executeQuery(ctx context.Context, query string) (float64, error) {
+	return c.executeQueryAt(ctx, query, time.Now())
+}
+
+// executeQueryAt runs PromQL evaluated at time at and returns the first sample, or 0 with no data.
+func (c *Client) executeQueryAt(ctx context.Context, query string, at time.Time) (float64, error) {
 	timeout, err := time.ParseDuration(c.config.Prometheus.Timeout)
 	if err != nil {
 		timeout = 10 * time.Second
@@ -43,7 +48,7 @@ func (c *Client) executeQuery(ctx context.Context, query string) (float64, error
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, warnings, err := c.v1api.Query(ctx, query, time.Now())
+	result, warnings, err := c.v1api.Query(ctx, query, at)
 	if err != nil {
 		return 0, fmt.Errorf("prometheus query failed: %w", err)
 	}

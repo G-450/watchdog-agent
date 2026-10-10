@@ -67,6 +67,25 @@ type PolicyConfig struct {
 	ExcludedNamespaces []string `yaml:"excluded_namespaces"`
 }
 
+// VerificationConfig controls post-deployment verification of merged Watchdog changes.
+// It runs only when GitOps is enabled, since it reads merged PRs and opens rollback PRs.
+type VerificationConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Window is how long a change is watched after it rolls out; the same length before the
+	// merge is the baseline.
+	Window string `yaml:"window"`
+	// RolloutTimeout is how long after the merge the new values may take to reach the cluster.
+	RolloutTimeout string `yaml:"rollout_timeout"`
+	// Lookback is how far back merged PRs are discovered.
+	Lookback string `yaml:"lookback"`
+	// MaxRollbacks failed changes to one workload stop further changes to it.
+	MaxRollbacks        int     `yaml:"max_rollbacks"`
+	MaxNewRestarts      float64 `yaml:"max_new_restarts"`      // restarts above the baseline
+	MaxThrottleIncrease float64 `yaml:"max_throttle_increase"` // absolute rise in throttled ratio, 0-1
+	MaxReplicaIncrease  float64 `yaml:"max_replica_increase"`  // rise in average replicas (HPA scale-out)
+	MinAvailability     float64 `yaml:"min_availability"`      // average available/desired, 0-1
+}
+
 // APIConfig holds dashboard API configuration.
 type APIConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
@@ -96,16 +115,17 @@ type GitOpsConfig struct {
 }
 
 type Config struct {
-	Agent      AgentConfig      `yaml:"agent"`
-	Prometheus PrometheusConfig `yaml:"prometheus"`
-	OpenCost   OpenCostConfig   `yaml:"opencost"`
-	Kubernetes KubernetesConfig `yaml:"kubernetes"`
-	Logging    LoggingConfig    `yaml:"logging"`
-	Storage    StorageConfig    `yaml:"storage"`
-	AIService  AIServiceConfig  `yaml:"ai_service"`
-	Policy     PolicyConfig     `yaml:"policy"`
-	API        APIConfig        `yaml:"api"`
-	GitOps     GitOpsConfig     `yaml:"gitops"`
+	Agent      AgentConfig        `yaml:"agent"`
+	Prometheus PrometheusConfig   `yaml:"prometheus"`
+	OpenCost   OpenCostConfig     `yaml:"opencost"`
+	Kubernetes KubernetesConfig   `yaml:"kubernetes"`
+	Logging    LoggingConfig      `yaml:"logging"`
+	Storage    StorageConfig      `yaml:"storage"`
+	AIService  AIServiceConfig    `yaml:"ai_service"`
+	Policy     PolicyConfig       `yaml:"policy"`
+	API        APIConfig          `yaml:"api"`
+	GitOps     GitOpsConfig       `yaml:"gitops"`
+	Verify     VerificationConfig `yaml:"verification"`
 }
 
 // Load reads the configuration from the given path.
@@ -263,6 +283,27 @@ func applyDefaults(config *Config) {
 	if config.GitOps.Auth == "" {
 		config.GitOps.Auth = "token"
 	}
+	if config.Verify.Window == "" {
+		config.Verify.Window = "30m"
+	}
+	if config.Verify.RolloutTimeout == "" {
+		config.Verify.RolloutTimeout = "30m"
+	}
+	if config.Verify.Lookback == "" {
+		config.Verify.Lookback = "168h"
+	}
+	if config.Verify.MaxRollbacks == 0 {
+		config.Verify.MaxRollbacks = 2
+	}
+	if config.Verify.MaxThrottleIncrease == 0 {
+		config.Verify.MaxThrottleIncrease = 0.10
+	}
+	if config.Verify.MaxReplicaIncrease == 0 {
+		config.Verify.MaxReplicaIncrease = 0.5
+	}
+	if config.Verify.MinAvailability == 0 {
+		config.Verify.MinAvailability = 0.9
+	}
 	if config.GitOps.PrivateKeyPath == "" {
 		config.GitOps.PrivateKeyPath = "/etc/watchdog/github-app/private-key.pem"
 	}
@@ -303,6 +344,20 @@ func validate(config *Config) error {
 			}
 		default:
 			return fmt.Errorf("gitops.auth must be token or app, got %q", config.GitOps.Auth)
+		}
+	}
+	if config.Verify.Enabled {
+		for name, value := range map[string]string{
+			"window": config.Verify.Window, "rollout_timeout": config.Verify.RolloutTimeout, "lookback": config.Verify.Lookback,
+		} {
+			if d, err := time.ParseDuration(value); err != nil {
+				return fmt.Errorf("verification.%s: %w", name, err)
+			} else if d <= 0 {
+				return fmt.Errorf("verification.%s must be positive, got %s", name, d)
+			}
+		}
+		if config.Verify.MaxRollbacks < 1 {
+			return fmt.Errorf("verification.max_rollbacks must be at least 1, got %d", config.Verify.MaxRollbacks)
 		}
 	}
 	return nil

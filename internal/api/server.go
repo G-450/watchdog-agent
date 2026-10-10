@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/workloads", s.workloads)
 	mux.HandleFunc("GET /api/v1/workloads/{namespace}/{name}", s.workload)
 	mux.HandleFunc("GET /api/v1/recommendations", s.recommendations)
+	mux.HandleFunc("GET /api/v1/verifications", s.verifications)
 	return s.withCORS(mux)
 }
 
@@ -185,6 +186,22 @@ func (s *Server) recommendations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"items": recommendations, "count": len(recommendations)})
+}
+
+// verifications lists post-deployment verifications of merged changes, newest first, and the
+// workloads halted after repeated rollbacks.
+func (s *Server) verifications(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.GetVerifications(r.Context(), parseLimit(r, 50))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "storage_unavailable", err.Error())
+		return
+	}
+	halted, err := s.store.GetHaltedWorkloads(r.Context())
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "storage_unavailable", err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"items": items, "count": len(items), "halted": halted})
 }
 
 func parseLimit(r *http.Request, fallback int) int {

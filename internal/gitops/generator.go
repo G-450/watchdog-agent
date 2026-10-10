@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,12 +82,17 @@ func New(cfg config.GitOpsConfig, excluded []string, tokens TokenSource) (*Gener
 	}, nil
 }
 
-// workloadPlan is the merged change for one workload across the cycle's approved recommendations.
+// workloadPlan is the merged change for one workload across the cycle's approved recommendations,
+// or a rollback of an earlier change when rollbackOf is set.
 type workloadPlan struct {
 	namespace, name string
+	branch          string
 	changes         ChangeSet
 	recs            []model.Recommendation
 	recChanges      []ChangeSet // per rec, parallel to recs
+
+	rollbackOf int      // PR whose change this restores; 0 for a recommendation
+	findings   []string // why the rollback is needed
 }
 
 // Apply opens or updates one PR per workload for the approved recommendations in recs.
@@ -137,7 +143,7 @@ func (g *Generator) plan(recs []model.Recommendation) []*workloadPlan {
 
 		p := byTarget[rec.Target]
 		if p == nil {
-			p = &workloadPlan{namespace: ns, name: name}
+			p = &workloadPlan{namespace: ns, name: name, branch: g.cfg.BranchPrefix + ns + "-" + name}
 			byTarget[rec.Target] = p
 			plans = append(plans, p)
 		}
@@ -161,56 +167,87 @@ func (g *Generator) applyWorkloadWithDeadline(ctx context.Context, p *workloadPl
 		return fmt.Errorf("get GitHub token: %w", err)
 	}
 	g.token = token
+	_, err = g.applyWorkload(ctx, p)
+	return err
+}
+
+// OpenRollback opens (or keeps) a PR on its own branch that restores a workload's previous
+// values after the change from PR sourcePR failed verification. It returns the PR number, or 0
+// when no PR proposes the rollback (a human declined it, or the manifest already matches).
+func (g *Generator) OpenRollback(ctx context.Context, target string, restore ChangeSet, sourcePR int, findings []string) (int, error) {
+	ns, name, ok := strings.Cut(target, "/")
+	if !ok || !dnsLabel.MatchString(ns) || !dnsLabel.MatchString(name) {
+		return 0, fmt.Errorf("rollback target %q is not namespace/name", target)
+	}
+	if g.excluded[ns] {
+		return 0, fmt.Errorf("rollback target %q is in an excluded namespace", target)
+	}
+	if restore.IsEmpty() {
+		return 0, fmt.Errorf("rollback for %s restores nothing", target)
+	}
+	p := &workloadPlan{
+		namespace: ns, name: name, branch: g.cfg.BranchPrefix + "rollback-" + ns + "-" + name,
+		changes: restore, rollbackOf: sourcePR, findings: findings,
+	}
+	ctx, cancel := context.WithTimeout(ctx, g.opTimeout)
+	defer cancel()
+	token, err := g.tokens.Token(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("get GitHub token: %w", err)
+	}
+	g.token = token
 	return g.applyWorkload(ctx, p)
 }
 
-// applyWorkload brings the workload's PR in line with p.changes.
-func (g *Generator) applyWorkload(ctx context.Context, p *workloadPlan) error {
+// applyWorkload brings the PR on p.branch in line with p.changes and returns the number of the
+// PR that proposes them, or 0 when none does.
+func (g *Generator) applyWorkload(ctx context.Context, p *workloadPlan) (int, error) {
 	target := p.namespace + "/" + p.name
 	log := slog.With(slog.String("target", target))
-	branch := g.cfg.BranchPrefix + p.namespace + "-" + p.name
+	branch := p.branch
 	marker, err := p.changes.marker()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	pr, declined, lastMerged, err := g.branchPRs(ctx, branch)
 	if err != nil {
-		return fmt.Errorf("look up PRs: %w", err)
+		return 0, fmt.Errorf("look up PRs: %w", err)
 	}
 	if pr != nil && prMarker(pr.Body) == marker {
 		log.Debug("GitOps PR already proposes this change", slog.Int("pr", pr.Number))
-		return nil
+		return pr.Number, nil
 	}
 	if pr == nil {
 		// A human closed this exact proposal without merging: treat it as a "no".
 		for _, d := range declined {
 			if prMarker(d.Body) == marker {
 				log.Debug("GitOps change was declined in a closed PR", slog.Int("pr", d.Number))
-				return nil
+				return 0, nil
 			}
 		}
 		// Let telemetry catch up with the last merged change before proposing the next one.
-		if until := lastMerged.Add(g.cooldown); g.cooldown > 0 && !lastMerged.IsZero() && g.now().Before(until) {
+		// A rollback is never held back.
+		if until := lastMerged.Add(g.cooldown); p.rollbackOf == 0 && g.cooldown > 0 && !lastMerged.IsZero() && g.now().Before(until) {
 			log.Info("GitOps change deferred: workload is in cooldown after a merged PR",
 				slog.Time("merged_at", lastMerged), slog.Time("until", until))
-			return nil
+			return 0, nil
 		}
 	}
 
 	dir := path.Join(g.cfg.ManifestRoot, p.namespace, p.name)
 	exists, err := g.pathExists(ctx, dir)
 	if err != nil {
-		return fmt.Errorf("check %s: %w", dir, err)
+		return 0, fmt.Errorf("check %s: %w", dir, err)
 	}
 	if !exists {
 		log.Warn("Skipping GitOps change: no manifest folder in the infra repo", slog.String("path", dir))
-		return nil
+		return 0, nil
 	}
 
 	tmp, err := os.MkdirTemp("", "watchdog-gitops-*")
 	if err != nil {
-		return fmt.Errorf("create work dir: %w", err)
+		return 0, fmt.Errorf("create work dir: %w", err)
 	}
 	defer func() {
 		if err := os.RemoveAll(tmp); err != nil {
@@ -221,63 +258,65 @@ func (g *Generator) applyWorkload(ctx context.Context, p *workloadPlan) error {
 	repoDir := filepath.Join(tmp, "repo")
 	if _, err := g.runGit(ctx, tmp, "clone", "--quiet", "--depth", "1", "--single-branch", "--no-tags",
 		"--branch", g.cfg.BaseBranch, g.cloneURL, repoDir); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := g.runGit(ctx, repoDir, "checkout", "--quiet", "-b", branch); err != nil {
-		return err
+		return 0, err
 	}
 
 	files, err := readManifests(repoDir, dir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(files) == 0 {
 		log.Warn("Skipping GitOps change: manifest folder has no YAML files", slog.String("path", dir))
-		return nil
+		return 0, nil
 	}
 	res, err := patchWorkload(files, p.name, p.changes)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, reason := range res.Skipped {
 		log.Warn("GitOps field not applied", slog.String("reason", reason))
 	}
 	if len(res.Edits) == 0 {
 		log.Info("GitOps change not needed: manifest already matches or no field applies", slog.String("path", res.Path))
-		return nil
+		return 0, nil
 	}
 
 	if err := os.WriteFile(filepath.Join(repoDir, filepath.FromSlash(res.Path)), res.Data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", res.Path, err)
+		return 0, fmt.Errorf("write %s: %w", res.Path, err)
 	}
 	if _, err := g.runGit(ctx, repoDir, "add", "--", res.Path); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := g.runGit(ctx, repoDir,
 		"-c", "user.name="+g.cfg.AuthorName, "-c", "user.email="+g.cfg.AuthorEmail,
 		"commit", "--quiet", "--no-verify", "-m", commitMessage(p, res.Edits)); err != nil {
-		return err
+		return 0, err
 	}
 	// The branch belongs to the agent; force-push replaces any earlier proposal.
 	if _, err := g.runGit(ctx, repoDir, "push", "--quiet", "--force", "origin", "HEAD:refs/heads/"+branch); err != nil {
-		return err
+		return 0, err
 	}
 
-	title := prTitle(p)
-	body := prBody(p, res, marker)
+	title, body := prTitle(p), prBody(p, res, marker)
+	if p.rollbackOf != 0 {
+		title, body = rollbackTitle(p), rollbackBody(p, res, marker)
+	}
 	if pr == nil {
 		created, err := g.createPR(ctx, branch, title, body)
 		if err != nil {
-			return fmt.Errorf("open PR: %w", err)
+			return 0, fmt.Errorf("open PR: %w", err)
 		}
 		log.Info("Opened GitOps PR", slog.Int("pr", created.Number), slog.String("url", created.HTMLURL))
-		return nil
+		return created.Number, nil
 	}
 	if err := g.updatePR(ctx, pr.Number, title, body); err != nil {
-		return fmt.Errorf("update PR #%d: %w", pr.Number, err)
+		return 0, fmt.Errorf("update PR #%d: %w", pr.Number, err)
 	}
 	log.Info("Updated GitOps PR", slog.Int("pr", pr.Number), slog.String("url", pr.HTMLURL))
-	return nil
+	return pr.Number, nil
 }
 
 // readManifests returns every .yaml/.yml file directly inside dir (repo-relative, slash-separated).
@@ -341,7 +380,35 @@ func commitMessage(p *workloadPlan, edits []fieldEdit) string {
 	for i, e := range edits {
 		parts[i] = fmt.Sprintf("%s %s→%s", e.Field, valueOrUnset(e.Old), e.New)
 	}
-	return fmt.Sprintf("chore(%s/%s): %s %s", p.namespace, p.name, actions(p), strings.Join(parts, ", "))
+	what := actions(p)
+	if p.rollbackOf != 0 {
+		what = fmt.Sprintf("roll back #%d", p.rollbackOf)
+	}
+	return fmt.Sprintf("chore(%s/%s): %s %s", p.namespace, p.name, what, strings.Join(parts, ", "))
+}
+
+func rollbackTitle(p *workloadPlan) string {
+	return fmt.Sprintf("watchdog: roll back #%d for %s/%s", p.rollbackOf, p.namespace, p.name)
+}
+
+func rollbackBody(p *workloadPlan, res patchResult, marker string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Watchdog rollback\n\n")
+	fmt.Fprintf(&b, "**Target:** `%s/%s` (Deployment in `%s`)\n\n", p.namespace, p.name, res.Path)
+	fmt.Fprintf(&b, "Post-deployment verification of #%d found a regression, so this restores the values it changed. Other fields are untouched.\n\n", p.rollbackOf)
+	b.WriteString("| Field | Current | Restored |\n|---|---|---|\n")
+	for _, e := range res.Edits {
+		fmt.Fprintf(&b, "| %s | `%s` | `%s` |\n", fieldLabels[e.Field], valueOrUnset(e.Old), e.New)
+	}
+	if len(p.findings) > 0 {
+		b.WriteString("\n**Verification findings:**\n")
+		for _, f := range p.findings {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+	b.WriteString("\n---\nOpened by the Watchdog agent. It needs human review; ArgoCD applies it only after merge.\n")
+	fmt.Fprintf(&b, "\n<!-- watchdog:changes %s -->\n<!-- watchdog:rollback-of %d -->\n", marker, p.rollbackOf)
+	return b.String()
 }
 
 func prTitle(p *workloadPlan) string {
@@ -390,5 +457,36 @@ func prBody(p *workloadPlan, res patchResult, marker string) string {
 
 	b.WriteString("\n---\nOpened by the Watchdog agent. It needs human review; ArgoCD applies it only after merge.\n")
 	fmt.Fprintf(&b, "\n<!-- watchdog:changes %s -->\n", marker)
+	// The values being replaced, so a failed change can be rolled back exactly.
+	if prev, ok := previousValues(res.Edits); ok {
+		if m, err := prev.marker(); err == nil {
+			fmt.Fprintf(&b, "<!-- watchdog:previous %s -->\n", m)
+		}
+	}
 	return b.String()
+}
+
+// previousValues is the change set that restores the manifest from before edits. It reports
+// false when a field did not exist before, since removing a field cannot be expressed.
+func previousValues(edits []fieldEdit) (ChangeSet, bool) {
+	var cs ChangeSet
+	for _, e := range edits {
+		if e.Old == "" {
+			return ChangeSet{}, false
+		}
+		switch e.Field {
+		case "cpu":
+			cs.CPU = e.Old
+		case "memory":
+			cs.Memory = e.Old
+		case "replicas":
+			n, err := strconv.ParseInt(e.Old, 10, 32)
+			if err != nil {
+				return ChangeSet{}, false
+			}
+			r := int32(n)
+			cs.Replicas = &r
+		}
+	}
+	return cs, !cs.IsEmpty()
 }

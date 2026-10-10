@@ -91,7 +91,7 @@ func NewSQLiteStore(dbPath string) (Store, error) {
 	CREATE INDEX IF NOT EXISTS idx_cluster_snapshots_timestamp ON cluster_snapshots(timestamp);
 	`
 
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + verificationSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}

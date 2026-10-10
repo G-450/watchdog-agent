@@ -50,6 +50,7 @@ func TestDashboardEndpoints(t *testing.T) {
 		{"/api/v1/recommendations?scope=all", http.StatusOK},
 		{"/api/v1/recommendations?scope=bogus", http.StatusBadRequest},
 		{"/api/v1/snapshots?since=yesterday", http.StatusBadRequest},
+		{"/api/v1/verifications", http.StatusOK},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -81,6 +82,37 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 	if overview.Workloads != 1 || overview.PotentialSavings != 3.25 {
 		t.Fatalf("unexpected overview: %+v", overview)
+	}
+}
+
+func TestVerificationsEndpoint(t *testing.T) {
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("initialize store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	t0 := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	if err := store.SaveVerification(ctx, &model.Verification{PR: 7, Target: "default/yolo-detector", MergedAt: t0,
+		Status: model.VerificationRollbackPR, RollbackPR: 9, Findings: []string{"3 container restarts"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetHaltedWorkloads(ctx, []model.HaltedWorkload{{Target: "default/yolo-detector", Since: t0, FailedPRs: []int{5, 7}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var body struct {
+		Items  []model.Verification   `json:"items"`
+		Count  int                    `json:"count"`
+		Halted []model.HaltedWorkload `json:"halted"`
+	}
+	handler := NewServer(store, "test-agent", nil).Handler()
+	if code := getJSON(t, handler, "/api/v1/verifications", &body); code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if body.Count != 1 || body.Items[0].RollbackPR != 9 || body.Items[0].Status != model.VerificationRollbackPR ||
+		len(body.Halted) != 1 || body.Halted[0].Target != "default/yolo-detector" {
+		t.Fatalf("unexpected body %+v", body)
 	}
 }
 
