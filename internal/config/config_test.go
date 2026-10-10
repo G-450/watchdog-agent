@@ -180,6 +180,9 @@ func TestLoadConfig_GitOps(t *testing.T) {
 		{name: "repo with extra segment", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r/x\"\n", wantErr: true},
 		{name: "bad timeout", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  timeout: \"soon\"\n", wantErr: true},
 		{name: "bad operation timeout", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  operation_timeout: \"later\"\n", wantErr: true},
+		{name: "bad cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"a while\"\n", wantErr: true},
+		{name: "negative cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"-1h\"\n", wantErr: true},
+		{name: "zero cooldown", yaml: base + "gitops:\n  enabled: true\n  repo: \"o/r\"\n  cooldown: \"0\"\n", wantEnabled: true, wantRepo: "o/r"},
 		{
 			name:     "unparseable env value is ignored",
 			yaml:     base + "gitops:\n  repo: \"o/r\"\n",
