@@ -90,7 +90,8 @@ def reason_node(state: AgentState) -> Dict[str, Any]:
     
     # 1. CPU Rightsizing: Over-provisioned (Scale Down requests with safety buffer)
     if profile["cpu_overprovisioned"]:
-        # Safe step down: 30% headroom above expected peak, capped at max 30% step-down per iteration
+        # Never go below expected peak + 30% headroom, and never cut more than 30% per change.
+        # Over-provisioned means peak < 50% of the request, so in practice the step-down cap decides.
         min_safe_cpu = round(expected_peak_cpu * 1.30, 3)
         max_allowed_step_down = round(cpu_req * 0.70, 3)
         proposed_cpu = max(min_safe_cpu, max_allowed_step_down)
@@ -115,10 +116,11 @@ def reason_node(state: AgentState) -> Dict[str, Any]:
                 "expected_savings": max(savings, 0.0),
                 "supporting_evidence": (
                     f"Forecasted 24h peak CPU is {expected_peak_cpu:.3f} cores vs requested {cpu_req:.3f} cores "
-                    f"({profile['cpu_util_ratio']*100:.1f}% utilization). Proposing step-down to {proposed_cpu:.3f} cores "
-                    f"retaining 30% safety headroom."
+                    f"({profile['cpu_util_ratio']*100:.1f}% utilization). Proposing {proposed_cpu:.3f} cores, "
+                    f"a 30% step-down (the most allowed per change); the forecast peak plus 30% headroom "
+                    f"is {min_safe_cpu:.3f} cores."
                 ),
-                "rule_trace": ["UtilizationProfiled", "OverProvisionedCPURule", "SafetyHeadroomApplied"],
+                "rule_trace": ["UtilizationProfiled", "OverProvisionedCPURule", "StepDownCapApplied"],
                 "safety_factor": 0.92
             })
             

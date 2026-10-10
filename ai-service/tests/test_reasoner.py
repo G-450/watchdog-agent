@@ -110,3 +110,12 @@ def test_reasoner_namespace_policy_rejection():
             assert rec["status"] == "Rejected"
             assert "PolicyRejected:ExcludedNamespace" in rec["rule_trace"]
             assert "protected" in rec["rejection_reason"]
+
+def test_reasoner_cpu_step_down_evidence_names_the_cap():
+    snapshot = {"namespaces": {"default": {"workloads": {"idle-app": {
+        "cpu_usage": 0.0, "cpu_requests": 0.35, "mem_usage": 200.0, "mem_requests": 1024.0, "replicas": 1,
+    }}}}}
+
+    cpu_rec = next(r for r in analyze_workloads(snapshot) if "OverProvisionedCPURule" in r["rule_trace"])
+    assert "StepDownCapApplied" in cpu_rec["rule_trace"]
+    assert "0.245 cores, a 30% step-down (the most allowed per change)" in cpu_rec["supporting_evidence"]
