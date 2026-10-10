@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const maxErrorBody = 4096
@@ -81,16 +82,17 @@ func (g *Generator) do(ctx context.Context, method, path string, in, out any) er
 	return nil
 }
 
-// branchPRs returns the open PR whose head is branch (or nil) and the closed, unmerged ones.
-// One request covers both, so the common "nothing to do" cycle stays a single API call.
-func (g *Generator) branchPRs(ctx context.Context, branch string) (open *pullRequest, declined []pullRequest, err error) {
+// branchPRs returns the open PR whose head is branch (or nil), the closed unmerged ones, and
+// when the most recent one was merged (zero if none). One request covers all three, so the
+// common "nothing to do" cycle stays a single API call.
+func (g *Generator) branchPRs(ctx context.Context, branch string) (open *pullRequest, declined []pullRequest, lastMerged time.Time, err error) {
 	q := url.Values{}
 	q.Set("head", g.owner+":"+branch)
 	q.Set("state", "all")
 	q.Set("per_page", "100")
 	var prs []pullRequest
 	if err := g.do(ctx, http.MethodGet, g.repoPath("pulls")+"?"+q.Encode(), nil, &prs); err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	for i := range prs {
 		switch {
@@ -98,9 +100,17 @@ func (g *Generator) branchPRs(ctx context.Context, branch string) (open *pullReq
 			open = &prs[i]
 		case prs[i].State == "closed" && prs[i].MergedAt == nil:
 			declined = append(declined, prs[i])
+		case prs[i].MergedAt != nil:
+			t, err := time.Parse(time.RFC3339, *prs[i].MergedAt)
+			if err != nil {
+				return nil, nil, time.Time{}, fmt.Errorf("PR #%d: merged_at: %w", prs[i].Number, err)
+			}
+			if t.After(lastMerged) {
+				lastMerged = t
+			}
 		}
 	}
-	return open, declined, nil
+	return open, declined, lastMerged, nil
 }
 
 // pathExists reports whether path exists on the base branch.

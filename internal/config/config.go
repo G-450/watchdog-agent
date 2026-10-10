@@ -85,6 +85,9 @@ type GitOpsConfig struct {
 	OperationTimeout string `yaml:"operation_timeout"`
 	AuthorName       string `yaml:"author_name"`
 	AuthorEmail      string `yaml:"author_email"`
+	// Cooldown is how long after a merged Watchdog PR the agent waits before proposing
+	// another change to the same workload, so new telemetry reflects the change. "0" disables it.
+	Cooldown string `yaml:"cooldown"`
 }
 
 type Config struct {
@@ -249,6 +252,9 @@ func applyDefaults(config *Config) {
 	if config.GitOps.AuthorEmail == "" {
 		config.GitOps.AuthorEmail = "watchdog-agent@users.noreply.github.com"
 	}
+	if config.GitOps.Cooldown == "" {
+		config.GitOps.Cooldown = "24h"
+	}
 }
 
 // validate ensures required fields are set.
@@ -272,6 +278,11 @@ func validate(config *Config) error {
 		}
 		if _, err := time.ParseDuration(config.GitOps.OperationTimeout); err != nil {
 			return fmt.Errorf("gitops.operation_timeout: %w", err)
+		}
+		if d, err := time.ParseDuration(config.GitOps.Cooldown); err != nil {
+			return fmt.Errorf("gitops.cooldown: %w", err)
+		} else if d < 0 {
+			return fmt.Errorf("gitops.cooldown must not be negative, got %s", d)
 		}
 	}
 	return nil

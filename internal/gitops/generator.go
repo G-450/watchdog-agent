@@ -29,6 +29,8 @@ type Generator struct {
 	cloneURL    string        // tests point it at a local bare repository
 	http        *http.Client  // per-request timeout from cfg.Timeout
 	opTimeout   time.Duration // deadline for all work on one workload
+	cooldown    time.Duration // quiet period after a merged PR; 0 disables it
+	now         func() time.Time
 }
 
 // New validates cfg and builds a Generator. token is the GitHub token; it is required.
@@ -51,6 +53,15 @@ func New(cfg config.GitOpsConfig, excluded []string, token string) (*Generator, 
 	if opTimeout <= 0 {
 		return nil, fmt.Errorf("gitops: operation_timeout must be positive, got %s", opTimeout)
 	}
+	var cooldown time.Duration
+	if cfg.Cooldown != "" {
+		if cooldown, err = time.ParseDuration(cfg.Cooldown); err != nil {
+			return nil, fmt.Errorf("gitops: cooldown: %w", err)
+		}
+		if cooldown < 0 {
+			return nil, fmt.Errorf("gitops: cooldown must not be negative, got %s", cooldown)
+		}
+	}
 	ex := make(map[string]bool, len(excluded))
 	for _, ns := range excluded {
 		ex[ns] = true
@@ -64,6 +75,8 @@ func New(cfg config.GitOpsConfig, excluded []string, token string) (*Generator, 
 		cloneURL:  "https://github.com/" + owner + "/" + repo + ".git",
 		http:      &http.Client{Timeout: timeout},
 		opTimeout: opTimeout,
+		cooldown:  cooldown,
+		now:       time.Now,
 	}, nil
 }
 
@@ -154,7 +167,7 @@ func (g *Generator) applyWorkload(ctx context.Context, p *workloadPlan) error {
 		return err
 	}
 
-	pr, declined, err := g.branchPRs(ctx, branch)
+	pr, declined, lastMerged, err := g.branchPRs(ctx, branch)
 	if err != nil {
 		return fmt.Errorf("look up PRs: %w", err)
 	}
@@ -169,6 +182,12 @@ func (g *Generator) applyWorkload(ctx context.Context, p *workloadPlan) error {
 				log.Debug("GitOps change was declined in a closed PR", slog.Int("pr", d.Number))
 				return nil
 			}
+		}
+		// Let telemetry catch up with the last merged change before proposing the next one.
+		if until := lastMerged.Add(g.cooldown); g.cooldown > 0 && !lastMerged.IsZero() && g.now().Before(until) {
+			log.Info("GitOps change deferred: workload is in cooldown after a merged PR",
+				slog.Time("merged_at", lastMerged), slog.Time("until", until))
+			return nil
 		}
 	}
 

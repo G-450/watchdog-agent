@@ -218,6 +218,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	return &testEnv{bare: bare, api: api, gen: gen}
 }
 
+// withMergedPR records a Watchdog PR on branch merged `ago` before a fixed clock, with a 24h cooldown.
+func withMergedPR(branch string, ago time.Duration) func(e *testEnv) {
+	return func(e *testEnv) {
+		now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+		merged := now.Add(-ago).Format(time.RFC3339)
+		e.gen.now = func() time.Time { return now }
+		e.gen.cooldown = 24 * time.Hour
+		e.api.prs[branch] = []pullRequest{{Number: 4, State: "closed", MergedAt: &merged, Body: "<!-- watchdog:changes {\"cpu\":\"700m\"} -->"}}
+	}
+}
+
 func (e *testEnv) show(t *testing.T, branch, path string) string {
 	t.Helper()
 	return git(t, e.bare, "show", branch+":"+path)
@@ -407,6 +418,43 @@ func TestApply(t *testing.T) {
 				// The fake main still holds 500m (as if the merge was reverted), so a new PR is due.
 				if e.api.count("POST /repos/o/r/pulls") != 1 {
 					t.Errorf("want a new PR, got %v", e.api.calls)
+				}
+			},
+		},
+		{
+			name:  "merged PR inside cooldown defers the next change",
+			recs:  []model.Recommendation{yoloRec},
+			setup: withMergedPR(yoloBranch, 23*time.Hour),
+			check: func(t *testing.T, e *testEnv) {
+				if n := e.api.count(""); n != 1 || e.api.count("GET /repos/o/r/pulls") != 1 {
+					t.Errorf("want only the PR lookup, got %v", e.api.calls)
+				}
+				if branchExists(e.bare, yoloBranch) {
+					t.Error("branch must not be pushed during cooldown")
+				}
+			},
+		},
+		{
+			name:  "merged PR past cooldown allows the next change",
+			recs:  []model.Recommendation{yoloRec},
+			setup: withMergedPR(yoloBranch, 25*time.Hour),
+			check: func(t *testing.T, e *testEnv) {
+				if e.api.count("POST /repos/o/r/pulls") != 1 {
+					t.Errorf("want a new PR, got %v", e.api.calls)
+				}
+			},
+		},
+		{
+			name: "cooldown does not block updating an open PR",
+			recs: []model.Recommendation{yoloRec},
+			setup: func(e *testEnv) {
+				withMergedPR(yoloBranch, time.Hour)(e)
+				e.api.prs[yoloBranch] = append(e.api.prs[yoloBranch],
+					pullRequest{Number: 5, State: "open", Body: "<!-- watchdog:changes {\"cpu\":\"400m\"} -->"})
+			},
+			check: func(t *testing.T, e *testEnv) {
+				if e.api.count("PATCH /repos/o/r/pulls/5") != 1 {
+					t.Errorf("want the open PR updated, got %v", e.api.calls)
 				}
 			},
 		},
