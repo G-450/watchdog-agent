@@ -316,3 +316,159 @@ func TestCompareIgnoresMissingSignals(t *testing.T) {
 		t.Errorf("NaN signals must not produce findings, got %v", findings)
 	}
 }
+
+// withRecheck rebuilds the harness's verifier with re-checking enabled.
+func (h *harness) withRecheck(t *testing.T, interval, horizon string) {
+	t.Helper()
+	cfg := config.VerificationConfig{Enabled: true, Window: "30m", RolloutTimeout: "30m", Lookback: "168h",
+		MaxRollbacks: 2, MaxThrottleIncrease: 0.10, MaxReplicaIncrease: 0.5, MinAvailability: 0.9,
+		RecheckInterval: interval, RecheckFor: horizon}
+	v, err := New(cfg, h.changes, h.metrics, h.cluster, h.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.now = func() time.Time { return h.now }
+	h.v = v
+}
+
+// verified drives a change through to Verified and returns the harness.
+func verifiedHarness(t *testing.T, interval, horizon string) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.withRecheck(t, interval, horizon)
+	h.changes.merged = []gitops.MergedChange{cpuChange(7, "350m", "500m", t0)}
+	h.cluster.deps["default/yolo-detector"] = deployment("350m", nil)
+	h.run(t, time.Minute)    // rolled out: verifying
+	h.run(t, 31*time.Minute) // window passed: verified
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Fatalf("setup: status %s, want Verified", got.Status)
+	}
+	return h
+}
+
+func TestVerifiedChangeIsRecheckedAndCanRegress(t *testing.T) {
+	h := verifiedHarness(t, "6h", "168h")
+
+	// Before the interval elapses nothing is re-measured.
+	calls := len(h.metrics.calls)
+	h.run(t, time.Hour)
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Fatalf("within the interval: status %s", got.Status)
+	}
+	if len(h.metrics.calls) != calls {
+		t.Errorf("re-checked after 1h, want no measurement before the 6h interval")
+	}
+
+	// Still healthy at the first due re-check: stays Verified, records when it was checked.
+	h.run(t, 6*time.Hour)
+	got := h.get(t, 7)
+	if got.Status != model.VerificationVerified {
+		t.Fatalf("healthy re-check: status %s, want Verified", got.Status)
+	}
+	if got.CheckedAt == nil || !got.CheckedAt.Equal(h.now) {
+		t.Errorf("CheckedAt = %v, want %v", got.CheckedAt, h.now)
+	}
+	if w := h.metrics.calls[len(h.metrics.calls)-1]; !w.end.Equal(h.now) || !w.start.Equal(h.now.Add(-30*time.Minute)) {
+		t.Errorf("re-check window %v, want the 30m before now (same length as the baseline)", w)
+	}
+	if len(h.changes.rollbacks) != 0 {
+		t.Fatal("a healthy re-check must not roll back")
+	}
+
+	// The workload now scales out, as demo-api did once its load was restored.
+	h.metrics.signals = func(time.Time, time.Time) model.HealthSignals {
+		return model.HealthSignals{AvgReplicas: 2, Availability: 1}
+	}
+	h.run(t, 6*time.Hour)
+	if got := h.get(t, 7); got.Status != model.VerificationDegraded {
+		t.Fatalf("after the regression: status %s, want Degraded", got.Status)
+	}
+
+	// The existing Degraded path then opens the rollback, restoring the original values.
+	h.run(t, time.Minute)
+	got = h.get(t, 7)
+	if got.Status != model.VerificationRollbackPR || got.RollbackPR != 9 {
+		t.Fatalf("rollback not proposed: %+v", got)
+	}
+	if len(h.changes.rollbacks) != 1 {
+		t.Fatalf("rollback calls = %d, want 1", len(h.changes.rollbacks))
+	}
+	if rb := h.changes.rollbacks[0]; rb.restore.CPU != "500m" || rb.source != 7 {
+		t.Errorf("rollback restores %+v from #%d, want 500m from #7", rb.restore, rb.source)
+	}
+}
+
+func TestRecheckIsOffByDefault(t *testing.T) {
+	h := newHarness(t) // no RecheckInterval: Verified stays terminal
+	h.changes.merged = []gitops.MergedChange{cpuChange(7, "350m", "500m", t0)}
+	h.cluster.deps["default/yolo-detector"] = deployment("350m", nil)
+	h.run(t, time.Minute)
+	h.run(t, 31*time.Minute)
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Fatalf("setup: %+v", got)
+	}
+
+	h.metrics.signals = func(time.Time, time.Time) model.HealthSignals {
+		return model.HealthSignals{AvgReplicas: 3, Availability: 1}
+	}
+	calls := len(h.metrics.calls)
+	h.run(t, 48*time.Hour)
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Errorf("status %s, want Verified: re-checking is opt-in", got.Status)
+	}
+	if len(h.metrics.calls) != calls {
+		t.Errorf("measured %d times, want none when re-checking is disabled", len(h.metrics.calls)-calls)
+	}
+	if len(h.changes.rollbacks) != 0 {
+		t.Error("no rollback may be proposed when re-checking is disabled")
+	}
+}
+
+func TestRecheckStopsAfterTheHorizon(t *testing.T) {
+	h := verifiedHarness(t, "6h", "24h")
+	h.metrics.signals = func(time.Time, time.Time) model.HealthSignals {
+		return model.HealthSignals{AvgReplicas: 3, Availability: 1}
+	}
+	h.run(t, 48*time.Hour) // past recheck_for
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Errorf("status %s, want Verified: past the horizon nothing is re-checked", got.Status)
+	}
+	if len(h.changes.rollbacks) != 0 {
+		t.Error("no rollback may be proposed past the re-check horizon")
+	}
+}
+
+func TestRecheckStopsOnceSupersededByALaterChange(t *testing.T) {
+	h := verifiedHarness(t, "6h", "168h")
+	// A later change moved the request away from the value this record verified, so its
+	// Previous no longer describes what to restore.
+	h.cluster.deps["default/yolo-detector"] = deployment("245m", nil)
+	h.metrics.signals = func(time.Time, time.Time) model.HealthSignals {
+		return model.HealthSignals{AvgReplicas: 3, Availability: 1}
+	}
+	h.run(t, 6*time.Hour)
+	if got := h.get(t, 7); got.Status != model.VerificationVerified {
+		t.Errorf("status %s, want Verified: a superseded change must not be rolled back", got.Status)
+	}
+	if len(h.changes.rollbacks) != 0 {
+		t.Error("a superseded change must not produce a rollback that overwrites the newer one")
+	}
+}
+
+func TestRecheckRejectsBadDurations(t *testing.T) {
+	base := config.VerificationConfig{Enabled: true, Window: "30m", RolloutTimeout: "30m", Lookback: "168h", MaxRollbacks: 2}
+	for name, cfg := range map[string]config.VerificationConfig{
+		"unparsable interval": {RecheckInterval: "soon"},
+		"negative interval":   {RecheckInterval: "-6h"},
+		"missing horizon":     {RecheckInterval: "6h", RecheckFor: ""},
+		"unparsable horizon":  {RecheckInterval: "6h", RecheckFor: "later"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := base
+			c.RecheckInterval, c.RecheckFor = cfg.RecheckInterval, cfg.RecheckFor
+			if _, err := New(c, &fakeChanges{}, &fakeMetrics{}, &fakeCluster{}, nil); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}

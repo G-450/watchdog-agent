@@ -56,11 +56,13 @@ type Store interface {
 type Verifier struct {
 	cfg                              config.VerificationConfig
 	window, rolloutTimeout, lookback time.Duration
-	changes                          Changes
-	metrics                          Metrics
-	cluster                          Cluster
-	store                            Store
-	now                              func() time.Time
+	// recheckInterval is zero when re-checking is disabled, which keeps Verified terminal.
+	recheckInterval, recheckFor time.Duration
+	changes                     Changes
+	metrics                     Metrics
+	cluster                     Cluster
+	store                       Store
+	now                         func() time.Time
 }
 
 // New builds a Verifier; cfg must already be validated.
@@ -76,6 +78,21 @@ func New(cfg config.VerificationConfig, changes Changes, metrics Metrics, cluste
 			return nil, fmt.Errorf("verification.%s: invalid duration %q", d.name, d.value)
 		}
 		*d.dst = parsed
+	}
+	// Re-checking is opt-in: an unset interval leaves Verified terminal, as before.
+	if cfg.RecheckInterval != "" {
+		parsed, err := time.ParseDuration(cfg.RecheckInterval)
+		if err != nil || parsed < 0 {
+			return nil, fmt.Errorf("verification.recheck_interval: invalid duration %q", cfg.RecheckInterval)
+		}
+		v.recheckInterval = parsed
+	}
+	if v.recheckInterval > 0 {
+		parsed, err := time.ParseDuration(cfg.RecheckFor)
+		if err != nil || parsed <= 0 {
+			return nil, fmt.Errorf("verification.recheck_for: invalid duration %q", cfg.RecheckFor)
+		}
+		v.recheckFor = parsed
 	}
 	return v, nil
 }
@@ -207,6 +224,32 @@ func (v *Verifier) advance(ctx context.Context, rec *model.Verification, now tim
 			log.Info("Watchdog change verified")
 		}
 
+	case model.VerificationVerified:
+		// A verdict establishes that the change was safe in the window it was measured in, not
+		// that it is safe. Re-measure while the change is still in place so a regression that
+		// starts after the window still reaches the rollback path.
+		due, err := v.recheckDue(ctx, rec, ns, name, prev, now)
+		if err != nil {
+			return err
+		}
+		if !due {
+			return nil
+		}
+		// The same length as the baseline, so restart and OOM counts stay comparable.
+		observed, err := v.metrics.HealthSignals(ctx, ns, name, now.Add(-v.window), now)
+		if err != nil {
+			return fmt.Errorf("recheck: %w", err)
+		}
+		checked := now
+		rec.CheckedAt, rec.Observed = &checked, &observed
+		if findings := v.compare(*rec.Baseline, observed, true); len(findings) > 0 {
+			rec.Status, rec.Findings = model.VerificationDegraded, findings
+			log.Warn("Verified Watchdog change regressed after its window; proposing a rollback",
+				slog.Any("findings", findings))
+		} else {
+			log.Debug("Verified Watchdog change re-checked; still healthy")
+		}
+
 	case model.VerificationDegraded:
 		pr, err := v.changes.OpenRollback(ctx, rec.Target, prev, rec.PR, rec.Findings)
 		if err != nil {
@@ -224,6 +267,37 @@ func (v *Verifier) advance(ctx context.Context, rec *model.Verification, now tim
 	}
 	rec.UpdatedAt = now
 	return v.store.SaveVerification(ctx, rec)
+}
+
+// recheckDue reports whether a verified change should be measured again now. It is due only
+// while re-checking is enabled, inside the re-check horizon, past the interval, with a
+// baseline to compare against, and while the cluster still runs the values this record
+// verified: once a later change supersedes them, this record's Previous no longer describes
+// what to restore, so rolling it back would overwrite the newer change.
+func (v *Verifier) recheckDue(ctx context.Context, rec *model.Verification, ns, name string, prev gitops.ChangeSet, now time.Time) (bool, error) {
+	if v.recheckInterval <= 0 || rec.Baseline == nil || rec.DeployedAt == nil {
+		return false, nil
+	}
+	if now.Sub(*rec.DeployedAt) > v.recheckFor {
+		return false, nil
+	}
+	// The first re-check is due one interval after the verdict, not after the rollout.
+	since := rec.UpdatedAt
+	if rec.CheckedAt != nil {
+		since = *rec.CheckedAt
+	}
+	if now.Sub(since) < v.recheckInterval {
+		return false, nil
+	}
+	var applied gitops.ChangeSet
+	if err := json.Unmarshal([]byte(rec.Changes), &applied); err != nil {
+		return false, fmt.Errorf("parse changes: %w", err)
+	}
+	dep, err := v.cluster.GetDeployment(ctx, ns, name)
+	if err != nil {
+		return false, fmt.Errorf("get deployment: %w", err)
+	}
+	return runs(dep, applied, prev) && rolledOut(dep), nil
 }
 
 // compare returns the regressions in observed relative to baseline. Restarts and OOM kills

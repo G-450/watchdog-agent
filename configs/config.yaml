@@ -71,6 +71,12 @@ verification:
   window: "30m"                  # watch each change this long after rollout; the same span before the merge is the baseline
   rollout_timeout: "30m"         # how long the new values may take to reach the cluster
   lookback: "168h"               # how far back merged PRs are discovered
+  # A verdict only establishes that a change was safe in the window it was measured in. While
+  # a verified change is still in place it is measured again every recheck_interval, and a
+  # regression returns it to the normal rollback path. Unset (the default) keeps Verified
+  # terminal, which is the behaviour before this setting existed.
+  recheck_interval: ""           # e.g. "6h"; empty or "0" disables re-checking
+  recheck_for: "168h"            # how long after rollout a verified change keeps being re-checked
   max_rollbacks: 2               # failed changes to one workload before Watchdog stops changing it
   max_new_restarts: 0            # container restarts allowed above the baseline
   max_throttle_increase: 0.10    # allowed rise in the CPU throttled-period ratio

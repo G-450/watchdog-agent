@@ -293,3 +293,43 @@ func TestLoadConfig_GitOpsEnabledEnvWarning(t *testing.T) {
 		t.Errorf("expected a warning, got %q", logs.String())
 	}
 }
+
+func TestVerificationRecheckValidation(t *testing.T) {
+	base := "agent:\n  port: 8081\nprometheus:\n  url: \"http://prom:9090\"\nopencost:\n  url: \"http://cost:9003\"\n" +
+		"policy:\n  min_confidence: 0.75\ngitops:\n  enabled: true\n  repo: \"owner/repo\"\n" +
+		"verification:\n  enabled: true\n"
+	tests := []struct {
+		name    string
+		verify  string
+		wantErr bool
+	}{
+		{"unset leaves Verified terminal", "", false},
+		{"explicit zero disables", "  recheck_interval: \"0\"\n", false},
+		{"valid interval", "  recheck_interval: \"6h\"\n", false},
+		{"unparsable interval", "  recheck_interval: \"soon\"\n", true},
+		{"negative interval", "  recheck_interval: \"-6h\"\n", true},
+		{"horizon shorter than interval", "  recheck_interval: \"6h\"\n  recheck_for: \"1h\"\n", true},
+		{"unparsable horizon", "  recheck_interval: \"6h\"\n  recheck_for: \"later\"\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(base+tt.verify), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if cfg.Verify.RecheckFor != "168h" {
+				t.Errorf("recheck_for defaulted to %q, want 168h", cfg.Verify.RecheckFor)
+			}
+		})
+	}
+}

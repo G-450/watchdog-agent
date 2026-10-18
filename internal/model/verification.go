@@ -6,7 +6,7 @@ import "time"
 const (
 	VerificationWaiting     = "WaitingForRollout" // merged; the cluster does not run the new values yet
 	VerificationVerifying   = "Verifying"         // running the new values; watching for regressions
-	VerificationVerified    = "Verified"          // the window passed without a regression
+	VerificationVerified    = "Verified"          // the window passed; re-checked while the change is still in place
 	VerificationDegraded    = "Degraded"          // a regression was found; a rollback PR is due
 	VerificationRollbackPR  = "RollbackProposed"  // a rollback PR is open for review
 	VerificationRolledBack  = "RolledBack"        // the rollback PR was merged
@@ -37,7 +37,10 @@ type Verification struct {
 	Observed   *HealthSignals `json:"observed,omitempty"` // the window after the rollout
 	Findings   []string       `json:"findings,omitempty"`
 	RollbackPR int            `json:"rollback_pr,omitempty"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	// CheckedAt is when a Verified change was last re-measured. A verdict holds only for the
+	// window it was measured in, so verified changes are re-checked while they remain in place.
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // HaltedWorkload is a workload Watchdog stopped changing after repeated rollbacks.

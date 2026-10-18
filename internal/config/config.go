@@ -78,6 +78,13 @@ type VerificationConfig struct {
 	RolloutTimeout string `yaml:"rollout_timeout"`
 	// Lookback is how far back merged PRs are discovered.
 	Lookback string `yaml:"lookback"`
+	// RecheckInterval is how often a verified change is measured again while it is still in
+	// place. A verdict only establishes that a change was safe in the window it was measured
+	// in, so without this a regression that starts after the window is never noticed. Empty
+	// or "0" disables re-checking and keeps Verified terminal.
+	RecheckInterval string `yaml:"recheck_interval"`
+	// RecheckFor is how long after rollout a verified change keeps being re-checked.
+	RecheckFor string `yaml:"recheck_for"`
 	// MaxRollbacks failed changes to one workload stop further changes to it.
 	MaxRollbacks        int     `yaml:"max_rollbacks"`
 	MaxNewRestarts      float64 `yaml:"max_new_restarts"`      // restarts above the baseline
@@ -295,6 +302,9 @@ func applyDefaults(config *Config) {
 	if config.Verify.MaxRollbacks == 0 {
 		config.Verify.MaxRollbacks = 2
 	}
+	if config.Verify.RecheckFor == "" {
+		config.Verify.RecheckFor = "168h"
+	}
 	if config.Verify.MaxThrottleIncrease == 0 {
 		config.Verify.MaxThrottleIncrease = 0.10
 	}
@@ -359,6 +369,31 @@ func validate(config *Config) error {
 		if config.Verify.MaxRollbacks < 1 {
 			return fmt.Errorf("verification.max_rollbacks must be at least 1, got %d", config.Verify.MaxRollbacks)
 		}
+		// recheck_interval is optional: empty or "0" keeps Verified terminal.
+		if d, err := parseOptionalDuration(config.Verify.RecheckInterval); err != nil {
+			return fmt.Errorf("verification.recheck_interval: %w", err)
+		} else if d < 0 {
+			return fmt.Errorf("verification.recheck_interval must not be negative, got %s", d)
+		} else if d > 0 {
+			for name, value := range map[string]string{"recheck_for": config.Verify.RecheckFor} {
+				if f, err := time.ParseDuration(value); err != nil {
+					return fmt.Errorf("verification.%s: %w", name, err)
+				} else if f <= 0 {
+					return fmt.Errorf("verification.%s must be positive, got %s", name, f)
+				} else if f < d {
+					return fmt.Errorf("verification.recheck_for (%s) must be at least recheck_interval (%s)", f, d)
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// parseOptionalDuration parses a duration that may be left unset. An empty string means zero,
+// which callers treat as "disabled" rather than as an error.
+func parseOptionalDuration(value string) (time.Duration, error) {
+	if value == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(value)
 }
