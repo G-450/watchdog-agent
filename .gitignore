@@ -12,6 +12,7 @@ agent.exe
 # Local-only
 .agents/
 CONTRIBUTING.md
+scripts/start-k3s.bat
 
 # Go caches
 .gocache/
@@ -22,3 +23,7 @@ CONTRIBUTING.md
 .env
 .env.local
 configs/config.local.yaml
+
+# MSYS/Git-Bash crash dumps produced on Windows development machines.
+bash.exe.stackdump
+*.stackdump
